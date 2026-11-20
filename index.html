@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Controle de Estoque — Loja</title>
+  <link rel="stylesheet" href="style.css" />
+  <meta name="theme-color" content="#16a34a" />
+  <link rel="manifest" href="manifest.json" />
+</head>
+<body>
+  <header class="topo">
+    <div class="container topo-conteudo">
+      <div>
+        <h1>Controle de Estoque</h1>
+        <p class="subtitulo">Toque ou passe o cursor no nome do produto para ver a foto</p>
+      </div>
+      <span id="status-conexao" class="badge">Aguardando dados</span>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Filtros de busca -->
+    <section class="filtros" aria-label="Filtros de pesquisa">
+      <div class="campo-filtro">
+        <label for="busca-nome">Buscar por nome</label>
+        <input
+          type="search"
+          id="busca-nome"
+          placeholder="Ex.: Cômoda Poquema."
+          autocomplete="off"
+        />
+      </div>
+
+      <div class="campo-filtro">
+        <label for="busca-cor">Buscar por cor</label>
+        <input
+          type="search"
+          id="busca-cor"
+          placeholder="Ex.: BR"
+          autocomplete="off"
+        />
+      </div>
+
+      <button type="button" id="btn-limpar-filtros" class="btn btn-secundario">
+        Limpar
+      </button>
+    </section>
+
+    <!-- Tabela / Lista responsiva de produtos -->
+    <section class="painel-estoque" aria-label="Lista de produtos">
+      <div class="tabela-wrapper">
+        <table class="tabela-estoque">
+          <thead>
+            <tr>
+              <th>Produto</th>
+              <th>Cor</th>
+              <th class="col-qtd">Quantidade</th>
+            </tr>
+          </thead>
+          <tbody id="corpo-estoque">
+            <!-- Linhas preenchidas via JS; exemplo visual estático abaixo -->
+            <tr data-linha="2" data-imagem="https://via.placeholder.com/300x300?text=Camiseta+Preta">
+              <td class="col-produto" data-label="Produto">
+                <button type="button" class="nome-produto" aria-expanded="false">
+                  Carregando Produto...
+                </button>
+              </td>
+              <td class="col-cor" data-label="Cor">
+                <span class="tag-cor">Carregando Cor...</span>
+              </td>
+              <td class="col-qtd" data-label="Quantidade">
+                <div class="controle-qtd">
+                  <button type="button" class="btn-qtd btn-menos" aria-label="Diminuir quantidade">−</button>
+                  <span class="valor-qtd" data-qtd-atual="12" data-qtd-original="12">Carregando Quantidade...</span>
+                  <button type="button" class="btn-qtd btn-mais" aria-label="Aumentar quantidade">+</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p id="mensagem-vazia" class="mensagem-vazia" hidden>
+        Nenhum produto encontrado com esse filtro.
+      </p>
+    </section>
+  </main>
+
+  <!-- Popover / Modal flutuante de imagem do produto -->
+  <div id="preview-imagem" class="preview-imagem" role="tooltip" aria-hidden="true">
+    <div class="preview-card">
+      <img id="preview-img-tag" src="" alt="Imagem do produto" />
+      <p id="preview-legenda" class="preview-legenda"></p>
+    </div>
+  </div>
+
+  <!-- Barra inferior que aparece apenas quando há quantidades alteradas -->
+  <div id="barra-salvar" class="barra-salvar" aria-live="polite">
+    <div class="container barra-salvar-conteudo">
+      <span id="resumo-alteracoes" class="resumo-alteracoes">
+        <strong>0</strong> item(ns) alterado(s)
+      </span>
+      <div class="acoes-salvar">
+        <button type="button" id="btn-descartar" class="btn btn-secundario">
+          Descartar
+        </button>
+        <button type="button" id="btn-abrir-salvar" class="btn btn-primario">
+          Salvar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de confirmação com senha do funcionário -->
+  <dialog id="modal-senha" class="modal-senha">
+    <form id="form-salvar-estoque" method="dialog" class="modal-conteudo">
+      <h2>Confirmar alterações</h2>
+      <p class="modal-descricao">
+        Digite sua senha de funcionário para salvar as novas quantidades na planilha.
+      </p>
+
+      <div class="campo-modal">
+        <label for="senha-funcionario">Senha do funcionário</label>
+        <input
+          type="password"
+          id="senha-funcionario"
+          name="senha"
+          placeholder="Digite sua senha"
+          required
+          autocomplete="current-password"
+        />
+      </div>
+
+      <p id="erro-senha" class="erro-senha" hidden></p>
+
+      <div class="modal-acoes">
+        <button type="button" id="btn-cancelar-modal" class="btn btn-secundario">
+          Cancelar
+        </button>
+        <button type="submit" id="btn-confirmar-salvar" class="btn btn-primario">
+          Confirmar e Salvar
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js" defer></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch((err) => {
+          console.error("Falha ao registrar Service Worker:", err);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
