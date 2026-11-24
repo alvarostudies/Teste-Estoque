@@ -236,6 +236,40 @@ input:focus {
   border: 1px solid var(--border);
 }
 
+.tag-cor.cor-br {
+  background: #ffffff;
+  border-color: #d1d5db;
+}
+
+.tag-cor.cor-cn {
+  background: #c49a6c;
+  border-color: #ad8054;
+}
+
+.tag-cor.cor-cn-off {
+  background: linear-gradient(110deg, #b8875a 0%, #f3e8d5 100%);
+  border-color: #c6ad91;
+}
+
+.tag-cor.cor-cn-grafite {
+  background: linear-gradient(110deg, #b8875a 0%, #718096 100%);
+  border-color: #9a8d82;
+}
+
+.tag-cor.cor-pr,
+.tag-cor.cor-pt {
+  color: #ffffff;
+  background: #000000;
+  border-color: #000000;
+}
+
+.tag-cor.cor-fr,
+.tag-cor.cor-cs {
+  color: #ffffff;
+  background: #5b3524;
+  border-color: #472719;
+}
+
 /* Controles + e - */
 .controle-qtd {
   display: inline-flex;

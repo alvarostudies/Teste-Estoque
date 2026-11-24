@@ -361,6 +361,20 @@ function renderizarTabela() {
     const spanCor = document.createElement("span");
     spanCor.className = "tag-cor";
     spanCor.textContent = item.cor || "—";
+    const corNormalizada = String(item.cor ?? "").trim().toLocaleUpperCase("pt-BR");
+    const classesPorCor = {
+      BR: "cor-br",
+      CN: "cor-cn",
+      "CN/OFF": "cor-cn-off",
+      "CN/GRAFITE": "cor-cn-grafite",
+      PR: "cor-pr",
+      PT: "cor-pt",
+      FR: "cor-fr",
+      CS: "cor-cs",
+    };
+    if (classesPorCor[corNormalizada]) {
+      spanCor.classList.add(classesPorCor[corNormalizada]);
+    }
     tdCor.appendChild(spanCor);
 
     // Coluna 3: Quantidade com + e - (nunca menor que 0)
