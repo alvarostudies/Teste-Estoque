@@ -3,6 +3,7 @@ const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw6qXvKfxN1c1w8M9qK
 
 const estado = {
   itens: [], // { id, linha, nome, cor, quantidadeOriginal, quantidadeAtual, imagem }
+  itensVenda: [], // Rascunho local da venda; não é enviado à planilha nesta etapa.
   avisoErroCarregamentoMostrado: false,
   carregando: false,
   salvando: false,
@@ -14,6 +15,7 @@ const el = {
   buscaNome: document.getElementById("busca-nome"),
   buscaCor: document.getElementById("busca-cor"),
   btnLimparFiltros: document.getElementById("btn-limpar-filtros"),
+  btnAbrirVenda: document.getElementById("btn-abrir-venda"),
   corpoEstoque: document.getElementById("corpo-estoque"),
   mensagemVazia: document.getElementById("mensagem-vazia"),
 
@@ -32,6 +34,24 @@ const el = {
   erroSenha: document.getElementById("erro-senha"),
   btnCancelarModal: document.getElementById("btn-cancelar-modal"),
   btnConfirmarSalvar: document.getElementById("btn-confirmar-salvar"),
+
+  modalVenda: document.getElementById("modal-venda"),
+  formVenda: document.getElementById("form-venda"),
+  vendaCliente: document.getElementById("venda-cliente"),
+  vendaData: document.getElementById("venda-data"),
+  vendaEndereco: document.getElementById("venda-endereco"),
+  vendaTelefone: document.getElementById("venda-telefone"),
+  vendaObservacao: document.getElementById("venda-observacao"),
+  vendaVendedor: document.getElementById("venda-vendedor"),
+  buscaProdutoVenda: document.getElementById("busca-produto-venda"),
+  resultadosProdutosVenda: document.getElementById("resultados-produtos-venda"),
+  mensagemResultadosVenda: document.getElementById("mensagem-resultados-venda"),
+  itensVenda: document.getElementById("itens-venda"),
+  contadorItensVenda: document.getElementById("contador-itens-venda"),
+  mensagemVenda: document.getElementById("mensagem-venda"),
+  statusVenda: document.getElementById("status-venda"),
+  btnFecharVenda: document.getElementById("btn-fechar-venda"),
+  btnCancelarVenda: document.getElementById("btn-cancelar-venda"),
 };
 
 // Cria um popup de aviso caso não exista no HTML (usado para o erro único de carregamento)
@@ -480,6 +500,195 @@ function esconderImagem() {
   }
 }
 
+function dataLocalISO() {
+  const hoje = new Date();
+  const ano = hoje.getFullYear();
+  const mes = String(hoje.getMonth() + 1).padStart(2, "0");
+  const dia = String(hoje.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+function abrirModalVenda() {
+  if (!el.modalVenda) return;
+
+  estado.itensVenda = [];
+  el.formVenda?.reset();
+  if (el.vendaData) el.vendaData.value = dataLocalISO();
+  if (el.statusVenda) {
+    el.statusVenda.hidden = true;
+    el.statusVenda.textContent = "";
+  }
+  renderizarResultadosVenda();
+  renderizarItensVenda();
+
+  if (typeof el.modalVenda.showModal === "function") {
+    el.modalVenda.showModal();
+  } else {
+    el.modalVenda.setAttribute("open", "");
+  }
+  el.vendaCliente?.focus();
+}
+
+function fecharModalVenda() {
+  if (typeof el.modalVenda?.close === "function") {
+    el.modalVenda.close();
+  } else {
+    el.modalVenda?.removeAttribute("open");
+  }
+}
+
+function renderizarResultadosVenda() {
+  if (!el.resultadosProdutosVenda || !el.mensagemResultadosVenda) return;
+
+  el.resultadosProdutosVenda.innerHTML = "";
+  const termo = normalizar(el.buscaProdutoVenda?.value || "");
+  if (!termo) {
+    el.mensagemResultadosVenda.textContent = "Digite para pesquisar os produtos do estoque.";
+    el.mensagemResultadosVenda.hidden = false;
+    return;
+  }
+
+  const resultados = estado.itens
+    .map((item, indice) => ({
+      item,
+      indice,
+      pontuacao: pontuarCampo(`${item.nome} ${item.cor}`, termo),
+    }))
+    .filter(({ item, pontuacao }) => item.nome && pontuacao.match)
+    .sort((a, b) => b.pontuacao.score - a.pontuacao.score || a.indice - b.indice)
+    .slice(0, 20);
+
+  if (resultados.length === 0) {
+    el.mensagemResultadosVenda.textContent = "Nenhum produto encontrado.";
+    el.mensagemResultadosVenda.hidden = false;
+    return;
+  }
+
+  el.mensagemResultadosVenda.hidden = true;
+  const fragmento = document.createDocumentFragment();
+
+  for (const { item } of resultados) {
+    const li = document.createElement("li");
+    li.className = "resultado-venda";
+
+    const dados = document.createElement("div");
+    dados.className = "dados-produto-venda";
+    const nome = document.createElement("div");
+    nome.className = "nome-produto-venda";
+    nome.textContent = item.nome || "Produto sem nome";
+    const detalhe = document.createElement("div");
+    detalhe.className = "detalhe-produto-venda";
+    detalhe.textContent = `${item.cor ? `Cor ${item.cor} · ` : ""}Estoque: ${item.quantidadeAtual}`;
+    dados.append(nome, detalhe);
+
+    const btnAdicionar = document.createElement("button");
+    btnAdicionar.type = "button";
+    btnAdicionar.className = "btn-adicionar-produto";
+    btnAdicionar.textContent = "Adicionar";
+    btnAdicionar.setAttribute("aria-label", `Adicionar ${item.nome}${item.cor ? `, cor ${item.cor}` : ""}`);
+    btnAdicionar.addEventListener("click", () => adicionarProdutoAVenda(item));
+
+    li.append(dados, btnAdicionar);
+    fragmento.appendChild(li);
+  }
+
+  el.resultadosProdutosVenda.appendChild(fragmento);
+}
+
+function adicionarProdutoAVenda(item) {
+  const existente = estado.itensVenda.find((produto) => produto.id === item.id);
+  if (existente) {
+    existente.quantidade += 1;
+  } else {
+    estado.itensVenda.push({
+      id: item.id,
+      nome: item.nome,
+      cor: item.cor,
+      quantidade: 1,
+    });
+  }
+  renderizarItensVenda();
+}
+
+function alterarQuantidadeItemVenda(id, delta) {
+  const item = estado.itensVenda.find((produto) => produto.id === id);
+  if (!item) return;
+  item.quantidade = Math.max(1, item.quantidade + delta);
+  renderizarItensVenda();
+}
+
+function removerItemDaVenda(id) {
+  estado.itensVenda = estado.itensVenda.filter((produto) => produto.id !== id);
+  renderizarItensVenda();
+}
+
+function renderizarItensVenda() {
+  if (!el.itensVenda) return;
+  el.itensVenda.innerHTML = "";
+
+  const quantidadeTotal = estado.itensVenda.reduce((soma, item) => soma + item.quantidade, 0);
+  if (el.contadorItensVenda) {
+    el.contadorItensVenda.textContent = `${quantidadeTotal} ${quantidadeTotal === 1 ? "item" : "itens"}`;
+  }
+  if (el.mensagemVenda) {
+    el.mensagemVenda.hidden = estado.itensVenda.length > 0;
+    el.mensagemVenda.textContent = "Nenhum produto adicionado ainda.";
+  }
+
+  const fragmento = document.createDocumentFragment();
+  for (const item of estado.itensVenda) {
+    const li = document.createElement("li");
+    li.className = "item-venda";
+
+    const dados = document.createElement("div");
+    dados.className = "dados-produto-venda";
+    const nome = document.createElement("div");
+    nome.className = "nome-produto-venda";
+    nome.textContent = item.nome || "Produto sem nome";
+    const detalhe = document.createElement("div");
+    detalhe.className = "detalhe-produto-venda";
+    detalhe.textContent = item.cor ? `Cor ${item.cor}` : "Sem cor informada";
+    dados.append(nome, detalhe);
+
+    const controles = document.createElement("div");
+    controles.className = "quantidade-item-venda";
+    const btnMenos = document.createElement("button");
+    btnMenos.type = "button";
+    btnMenos.className = "btn-quantidade-venda";
+    btnMenos.textContent = "−";
+    btnMenos.setAttribute("aria-label", `Diminuir quantidade de ${item.nome}`);
+    btnMenos.addEventListener("click", () => alterarQuantidadeItemVenda(item.id, -1));
+    const quantidade = document.createElement("strong");
+    quantidade.textContent = String(item.quantidade);
+    const btnMais = document.createElement("button");
+    btnMais.type = "button";
+    btnMais.className = "btn-quantidade-venda";
+    btnMais.textContent = "+";
+    btnMais.setAttribute("aria-label", `Aumentar quantidade de ${item.nome}`);
+    btnMais.addEventListener("click", () => alterarQuantidadeItemVenda(item.id, 1));
+    const btnRemover = document.createElement("button");
+    btnRemover.type = "button";
+    btnRemover.className = "btn-remover-item";
+    btnRemover.textContent = "Remover";
+    btnRemover.addEventListener("click", () => removerItemDaVenda(item.id));
+    controles.append(btnMenos, quantidade, btnMais, btnRemover);
+
+    li.append(dados, controles);
+    fragmento.appendChild(li);
+  }
+  el.itensVenda.appendChild(fragmento);
+}
+
+function registrarVendaPendente(evento) {
+  evento.preventDefault();
+  if (!el.statusVenda) return;
+
+  // TODO futuro: validar os dados da venda e gravá-los sem alterar o estoque.
+  // TODO futuro: implementar a baixa de estoque somente após definir o fluxo de autorização.
+  el.statusVenda.textContent = "O registro de vendas ainda não está implementado; nada foi salvo.";
+  el.statusVenda.hidden = false;
+}
+
 // Popup de senha para salvar
 function abrirModalSenha() {
   if (obterItensAlterados().length === 0) return;
@@ -596,6 +805,11 @@ el.btnDescartar?.addEventListener("click", descartarAlteracoes);
 el.btnAbrirSalvar?.addEventListener("click", abrirModalSenha);
 el.btnCancelarModal?.addEventListener("click", fecharModalSenha);
 el.formSalvar?.addEventListener("submit", salvarAlteracoesComSenha);
+el.btnAbrirVenda?.addEventListener("click", abrirModalVenda);
+el.btnFecharVenda?.addEventListener("click", fecharModalVenda);
+el.btnCancelarVenda?.addEventListener("click", fecharModalVenda);
+el.buscaProdutoVenda?.addEventListener("input", renderizarResultadosVenda);
+el.formVenda?.addEventListener("submit", registrarVendaPendente);
 
 // Garante que a imagem suma se o usuário soltar o dedo/mouse fora do botão
 document.addEventListener("pointerup", esconderImagem);

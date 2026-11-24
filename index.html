@@ -45,6 +45,9 @@
       <button type="button" id="btn-limpar-filtros" class="btn btn-secundario">
         Limpar
       </button>
+      <button type="button" id="btn-abrir-venda" class="btn btn-primario">
+        Vender
+      </button>
     </section>
 
     <!-- Tabela / Lista responsiva de produtos -->
@@ -111,6 +114,75 @@
       </div>
     </div>
   </div>
+
+  <!-- Popup de venda: interface local; gravação da venda será implementada depois. -->
+  <dialog id="modal-venda" class="modal-venda" aria-labelledby="titulo-modal-venda">
+    <form id="form-venda" class="modal-conteudo form-venda">
+      <div class="modal-venda-cabecalho">
+        <div>
+          <h2 id="titulo-modal-venda">Nova venda</h2>
+          <p class="modal-descricao">Preencha os dados e adicione os produtos da compra.</p>
+        </div>
+        <button type="button" id="btn-fechar-venda" class="btn-fechar-modal" aria-label="Fechar venda">×</button>
+      </div>
+
+      <div class="venda-dados-grid">
+        <div class="campo-modal">
+          <label for="venda-cliente">Nome do cliente</label>
+          <input type="text" id="venda-cliente" name="cliente" autocomplete="name" />
+        </div>
+        <div class="campo-modal">
+          <label for="venda-data">Data</label>
+          <input type="date" id="venda-data" name="data" />
+        </div>
+        <div class="campo-modal venda-campo-endereco">
+          <label for="venda-endereco">Endereço</label>
+          <input type="text" id="venda-endereco" name="endereco" autocomplete="street-address" />
+        </div>
+        <div class="campo-modal">
+          <label for="venda-telefone">Nº de telefone</label>
+          <input type="tel" id="venda-telefone" name="telefone" autocomplete="tel" />
+        </div>
+        <div class="campo-modal">
+          <label for="venda-vendedor">Vendedor</label>
+          <input type="text" id="venda-vendedor" name="vendedor" autocomplete="name" />
+        </div>
+        <div class="campo-modal venda-campo-observacao">
+          <label for="venda-observacao">Observação</label>
+          <textarea id="venda-observacao" name="observacao" rows="2"></textarea>
+        </div>
+      </div>
+
+      <section class="venda-produtos" aria-labelledby="titulo-produtos-venda">
+        <h3 id="titulo-produtos-venda">Produtos da compra</h3>
+        <div class="campo-modal">
+          <label for="busca-produto-venda">Pesquisar produto</label>
+          <input type="search" id="busca-produto-venda" placeholder="Digite o nome ou a cor" autocomplete="off" />
+        </div>
+        <ul id="resultados-produtos-venda" class="lista-resultados-venda" aria-live="polite"></ul>
+        <p id="mensagem-resultados-venda" class="mensagem-venda" aria-live="polite">
+          Digite para pesquisar os produtos do estoque.
+        </p>
+
+        <div class="lista-venda-cabecalho">
+          <h4>Itens adicionados</h4>
+          <span id="contador-itens-venda">0 itens</span>
+        </div>
+        <ul id="itens-venda" class="lista-itens-venda"></ul>
+        <p id="mensagem-venda" class="mensagem-venda" aria-live="polite">
+          Nenhum produto adicionado ainda.
+        </p>
+      </section>
+
+      <p class="aviso-venda-rascunho">Esta tela ainda não salva vendas nem altera o estoque.</p>
+      <p id="status-venda" class="status-venda" role="status" hidden></p>
+
+      <div class="modal-acoes">
+        <button type="button" id="btn-cancelar-venda" class="btn btn-secundario">Cancelar</button>
+        <button type="submit" class="btn btn-primario">Registrar venda</button>
+      </div>
+    </form>
+  </dialog>
 
   <!-- Modal de confirmação com senha do funcionário -->
   <dialog id="modal-senha" class="modal-senha">
