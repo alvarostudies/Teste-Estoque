@@ -321,14 +321,31 @@ function renderizarTabela() {
     btnNome.textContent = item.nome || "Produto sem nome";
     btnNome.setAttribute("aria-expanded", "false");
 
-    btnNome.addEventListener("pointerenter", (e) => {
-      if (e.pointerType === "mouse") mostrarImagem(item);
-    });
-    btnNome.addEventListener("pointerleave", (e) => {
-      if (e.pointerType === "mouse") esconderImagem();
-    });
-    btnNome.addEventListener("pointerdown", () => {
+    btnNome.addEventListener("pointerenter", () => {
+      btnNome.setAttribute("aria-expanded", "true");
       mostrarImagem(item);
+    });
+
+    btnNome.addEventListener("pointerleave", (e) => {
+      // Se o cursor foi direto para a caixa de preview, mantém a imagem aberta
+      if (el.previewImagem && e.relatedTarget && el.previewImagem.contains(e.relatedTarget)) {
+        return;
+      }
+      btnNome.setAttribute("aria-expanded", "false");
+      esconderImagem();
+    });
+
+    btnNome.addEventListener("focus", () => {
+      btnNome.setAttribute("aria-expanded", "true");
+      mostrarImagem(item);
+    });
+
+    btnNome.addEventListener("blur", (e) => {
+      if (el.previewImagem && e.relatedTarget && el.previewImagem.contains(e.relatedTarget)) {
+        return;
+      }
+      btnNome.setAttribute("aria-expanded", "false");
+      esconderImagem();
     });
     btnNome.addEventListener("pointerup", esconderImagem);
     btnNome.addEventListener("pointercancel", esconderImagem);
