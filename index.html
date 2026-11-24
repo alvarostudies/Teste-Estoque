@@ -115,7 +115,7 @@
     </div>
   </div>
 
-  <!-- Popup de venda: interface local; gravação da venda será implementada depois. -->
+  <!-- Popup para preencher e registrar vendas. -->
   <dialog id="modal-venda" class="modal-venda" aria-labelledby="titulo-modal-venda">
     <form id="form-venda" class="modal-conteudo form-venda">
       <div class="modal-venda-cabecalho">
@@ -129,11 +129,11 @@
       <div class="venda-dados-grid">
         <div class="campo-modal">
           <label for="venda-cliente">Nome do cliente</label>
-          <input type="text" id="venda-cliente" name="cliente" autocomplete="name" />
+          <input type="text" id="venda-cliente" name="cliente" autocomplete="name" required />
         </div>
         <div class="campo-modal">
           <label for="venda-data">Data</label>
-          <input type="date" id="venda-data" name="data" />
+          <input type="date" id="venda-data" name="data" required />
         </div>
         <div class="campo-modal venda-campo-endereco">
           <label for="venda-endereco">Endereço</label>
@@ -145,7 +145,7 @@
         </div>
         <div class="campo-modal">
           <label for="venda-vendedor">Vendedor</label>
-          <input type="text" id="venda-vendedor" name="vendedor" autocomplete="name" />
+          <input type="text" id="venda-vendedor" name="vendedor" autocomplete="name" required />
         </div>
         <div class="campo-modal venda-campo-observacao">
           <label for="venda-observacao">Observação</label>
@@ -174,7 +174,7 @@
         </p>
       </section>
 
-      <p class="aviso-venda-rascunho">Esta tela ainda não salva vendas nem altera o estoque.</p>
+      <p class="aviso-venda">Ao registrar, será solicitada a senha do vendedor e o estoque será atualizado.</p>
       <p id="status-venda" class="status-venda" role="status" hidden></p>
 
       <div class="modal-acoes">
@@ -187,13 +187,13 @@
   <!-- Modal de confirmação com senha do funcionário -->
   <dialog id="modal-senha" class="modal-senha">
     <form id="form-salvar-estoque" method="dialog" class="modal-conteudo">
-      <h2>Confirmar alterações</h2>
-      <p class="modal-descricao">
+      <h2 id="modal-senha-titulo">Confirmar alterações</h2>
+      <p id="modal-senha-descricao" class="modal-descricao">
         Digite sua senha de funcionário para salvar as novas quantidades na planilha.
       </p>
 
       <div class="campo-modal">
-        <label for="senha-funcionario">Senha do funcionário</label>
+          <label id="label-senha-funcionario" for="senha-funcionario">Senha do funcionário</label>
         <input
           type="password"
           id="senha-funcionario"

@@ -3,7 +3,9 @@ const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw6qXvKfxN1c1w8M9qK
 
 const estado = {
   itens: [], // { id, linha, nome, cor, quantidadeOriginal, quantidadeAtual, imagem }
-  itensVenda: [], // Rascunho local da venda; não é enviado à planilha nesta etapa.
+  itensVenda: [], // Itens da venda em preparação no popup.
+  idVendaAtual: null,
+  operacaoSenha: null,
   avisoErroCarregamentoMostrado: false,
   carregando: false,
   salvando: false,
@@ -29,8 +31,11 @@ const el = {
   btnAbrirSalvar: document.getElementById("btn-abrir-salvar"),
 
   modalSenha: document.getElementById("modal-senha"),
+  modalSenhaTitulo: document.getElementById("modal-senha-titulo"),
+  modalSenhaDescricao: document.getElementById("modal-senha-descricao"),
   formSalvar: document.getElementById("form-salvar-estoque"),
   senhaFuncionario: document.getElementById("senha-funcionario"),
+  labelSenhaFuncionario: document.getElementById("label-senha-funcionario"),
   erroSenha: document.getElementById("erro-senha"),
   btnCancelarModal: document.getElementById("btn-cancelar-modal"),
   btnConfirmarSalvar: document.getElementById("btn-confirmar-salvar"),
@@ -271,11 +276,12 @@ async function carregarEstoque() {
     definirStatus("Configure a URL do Web App", "erro");
     mostrarAvisoErroCarregamentoUnico();
     renderizarTabela();
-    return;
+    return false;
   }
 
   estado.carregando = true;
   definirStatus("Carregando estoque...", "info");
+  let carregouComSucesso = false;
 
   try {
     const resposta = await fetch(`${WEB_APP_URL}?acao=listar`, {
@@ -293,6 +299,7 @@ async function carregarEstoque() {
     }
 
     estado.itens = normalizarDadosPlanilha(dados);
+    carregouComSucesso = true;
     definirStatus("Estoque atualizado", "ok");
   } catch (erro) {
     console.error("Erro ao carregar planilha:", erro);
@@ -303,6 +310,7 @@ async function carregarEstoque() {
     renderizarTabela();
     atualizarBarraSalvar();
   }
+  return carregouComSucesso;
 }
 
 function renderizarTabela() {
@@ -512,6 +520,7 @@ function abrirModalVenda() {
   if (!el.modalVenda) return;
 
   estado.itensVenda = [];
+  estado.idVendaAtual = gerarIdVendaCliente();
   el.formVenda?.reset();
   if (el.vendaData) el.vendaData.value = dataLocalISO();
   if (el.statusVenda) {
@@ -527,6 +536,11 @@ function abrirModalVenda() {
     el.modalVenda.setAttribute("open", "");
   }
   el.vendaCliente?.focus();
+}
+
+function gerarIdVendaCliente() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function fecharModalVenda() {
@@ -679,25 +693,52 @@ function renderizarItensVenda() {
   el.itensVenda.appendChild(fragmento);
 }
 
-function registrarVendaPendente(evento) {
+function iniciarRegistroVenda(evento) {
   evento.preventDefault();
-  if (!el.statusVenda) return;
+  if (!el.statusVenda || estado.salvando) return;
 
-  // TODO futuro: validar os dados da venda e gravá-los sem alterar o estoque.
-  // TODO futuro: implementar a baixa de estoque somente após definir o fluxo de autorização.
-  el.statusVenda.textContent = "O registro de vendas ainda não está implementado; nada foi salvo.";
-  el.statusVenda.hidden = false;
+  if (estado.itensVenda.length === 0) {
+    el.statusVenda.textContent = "Adicione pelo menos um produto à venda.";
+    el.statusVenda.hidden = false;
+    return;
+  }
+  if (obterItensAlterados().length > 0) {
+    el.statusVenda.textContent = "Salve ou descarte as alterações do estoque antes de registrar a venda.";
+    el.statusVenda.hidden = false;
+    return;
+  }
+
+  el.statusVenda.hidden = true;
+  el.statusVenda.textContent = "";
+  abrirModalSenha("venda");
 }
 
 // Popup de senha para salvar
-function abrirModalSenha() {
-  if (obterItensAlterados().length === 0) return;
+function abrirModalSenha(operacao = "estoque") {
+  if (operacao === "estoque" && obterItensAlterados().length === 0) return;
+
+  estado.operacaoSenha = operacao;
+  if (el.modalSenhaTitulo) {
+    el.modalSenhaTitulo.textContent = operacao === "venda" ? "Confirmar venda" : "Confirmar alterações";
+  }
+  if (el.modalSenhaDescricao) {
+    el.modalSenhaDescricao.textContent = operacao === "venda"
+      ? "Digite a senha do vendedor para registrar a venda e baixar os itens do estoque."
+      : "Digite sua senha de funcionário para salvar as novas quantidades na planilha.";
+  }
+  if (el.labelSenhaFuncionario) {
+    el.labelSenhaFuncionario.textContent = operacao === "venda"
+      ? "Senha do vendedor"
+      : "Senha do funcionário";
+  }
 
   el.erroSenha.hidden = true;
   el.erroSenha.textContent = "";
   el.senhaFuncionario.value = "";
   el.btnConfirmarSalvar.disabled = false;
-  el.btnConfirmarSalvar.textContent = "Confirmar e Salvar";
+  el.btnConfirmarSalvar.textContent = operacao === "venda"
+    ? "Confirmar e Registrar Venda"
+    : "Confirmar e Salvar";
 
   if (typeof el.modalSenha.showModal === "function") {
     el.modalSenha.showModal();
@@ -714,6 +755,8 @@ function fecharModalSenha() {
   } else {
     el.modalSenha.removeAttribute("open");
   }
+  el.senhaFuncionario.value = "";
+  estado.operacaoSenha = null;
 }
 
 async function salvarAlteracoesComSenha(evento) {
@@ -725,6 +768,10 @@ async function salvarAlteracoesComSenha(evento) {
     el.erroSenha.textContent = "Digite sua senha para salvar.";
     el.erroSenha.hidden = false;
     return;
+  }
+
+  if (estado.operacaoSenha === "venda") {
+    return registrarVendaComSenha(senha);
   }
 
   const alterados = obterItensAlterados().map((item) => ({
@@ -791,6 +838,94 @@ async function salvarAlteracoesComSenha(evento) {
   }
 }
 
+async function registrarVendaComSenha(senha) {
+  if (estado.salvando) return;
+
+  const itens = estado.itensVenda.map((produto) => {
+    const itemEstoque = estado.itens.find((item) => item.id === produto.id);
+    return itemEstoque
+      ? {
+          linha: itemEstoque.linha,
+          nome: itemEstoque.nome,
+          cor: itemEstoque.cor,
+          quantidade: produto.quantidade,
+        }
+      : null;
+  }).filter(Boolean);
+
+  if (itens.length === 0) {
+    el.erroSenha.textContent = "Não há produtos válidos para registrar.";
+    el.erroSenha.hidden = false;
+    return;
+  }
+
+  estado.salvando = true;
+  el.erroSenha.hidden = true;
+  el.btnConfirmarSalvar.disabled = true;
+  el.btnConfirmarSalvar.textContent = "Verificando senha e registrando...";
+
+  try {
+    const resposta = await fetch(WEB_APP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        acao: "vender",
+        senha,
+        idVenda: estado.idVendaAtual,
+        venda: {
+          cliente: el.vendaCliente.value.trim(),
+          data: el.vendaData.value,
+          endereco: el.vendaEndereco.value.trim(),
+          telefone: el.vendaTelefone.value.trim(),
+          observacao: el.vendaObservacao.value.trim(),
+          vendedor: el.vendaVendedor.value.trim(),
+          itens,
+        },
+      }),
+    });
+
+    if (!resposta.ok) {
+      throw new Error(`HTTP ${resposta.status}`);
+    }
+
+    const resultado = await resposta.json();
+    if (!resultado || resultado.ok !== true) {
+      const mensagem = resultado?.mensagem || "Não foi possível registrar a venda.";
+      el.erroSenha.textContent = mensagem;
+      el.erroSenha.hidden = false;
+      if (el.statusVenda) {
+        el.statusVenda.textContent = mensagem;
+        el.statusVenda.hidden = false;
+      }
+      el.btnConfirmarSalvar.disabled = false;
+      el.btnConfirmarSalvar.textContent = "Confirmar e Registrar Venda";
+      return;
+    }
+
+    estado.salvando = false;
+    fecharModalSenha();
+    fecharModalVenda();
+    estado.itensVenda = [];
+    estado.idVendaAtual = null;
+    definirStatus("Venda registrada; atualizando estoque...", "ok");
+    const estoqueCarregado = await carregarEstoque();
+    if (estoqueCarregado) {
+      definirStatus("Venda registrada e estoque atualizado", "ok");
+    } else {
+      definirStatus("Venda registrada; não foi possível atualizar a tela do estoque", "erro");
+    }
+  } catch (erro) {
+    console.error("Erro ao registrar venda:", erro);
+    el.erroSenha.textContent =
+      "Não foi possível confirmar o resultado. Verifique a aba vendas antes de tentar novamente.";
+    el.erroSenha.hidden = false;
+    el.btnConfirmarSalvar.disabled = false;
+    el.btnConfirmarSalvar.textContent = "Confirmar e Registrar Venda";
+  } finally {
+    estado.salvando = false;
+  }
+}
+
 // Eventos gerais
 el.buscaNome?.addEventListener("input", renderizarTabela);
 el.buscaCor?.addEventListener("input", renderizarTabela);
@@ -809,7 +944,7 @@ el.btnAbrirVenda?.addEventListener("click", abrirModalVenda);
 el.btnFecharVenda?.addEventListener("click", fecharModalVenda);
 el.btnCancelarVenda?.addEventListener("click", fecharModalVenda);
 el.buscaProdutoVenda?.addEventListener("input", renderizarResultadosVenda);
-el.formVenda?.addEventListener("submit", registrarVendaPendente);
+el.formVenda?.addEventListener("submit", iniciarRegistroVenda);
 
 // Garante que a imagem suma se o usuário soltar o dedo/mouse fora do botão
 document.addEventListener("pointerup", esconderImagem);
