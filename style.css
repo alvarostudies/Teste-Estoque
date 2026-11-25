@@ -226,6 +226,12 @@ input:focus {
   text-decoration-style: solid;
 }
 
+.nome-produto.sem-estoque,
+.nome-produto.sem-estoque:hover,
+.nome-produto.sem-estoque:focus-visible {
+  color: #b91c1c;
+}
+
 .tag-cor {
   display: inline-block;
   padding: 4px 10px;
@@ -601,6 +607,10 @@ input:focus {
   overflow-wrap: anywhere;
 }
 
+.nome-produto-venda.nome-sem-estoque {
+  color: #b91c1c;
+}
+
 .btn-adicionar-produto,
 .btn-remover-item {
   flex: 0 0 auto;
@@ -619,6 +629,13 @@ input:focus {
   color: var(--primary-hover);
   border-color: #bbf7d0;
   background: #f0fdf4;
+}
+
+.btn-adicionar-produto:disabled {
+  color: #6b7280;
+  border-color: var(--border);
+  background: #f3f4f6;
+  cursor: not-allowed;
 }
 
 .quantidade-item-venda {

@@ -5,6 +5,7 @@ const estado = {
   itens: [], // { id, linha, nome, cor, quantidadeOriginal, quantidadeAtual, imagem }
   itensVenda: [], // Itens da venda em preparação no popup.
   idVendaAtual: null,
+  dataVendaPadrao: null,
   operacaoSenha: null,
   avisoErroCarregamentoMostrado: false,
   carregando: false,
@@ -56,6 +57,7 @@ const el = {
   mensagemVenda: document.getElementById("mensagem-venda"),
   statusVenda: document.getElementById("status-venda"),
   btnFecharVenda: document.getElementById("btn-fechar-venda"),
+  btnLimparVenda: document.getElementById("btn-limpar-venda"),
   btnCancelarVenda: document.getElementById("btn-cancelar-venda"),
 };
 
@@ -346,6 +348,7 @@ function renderizarTabela() {
     const btnNome = document.createElement("button");
     btnNome.type = "button";
     btnNome.className = "nome-produto";
+    if (Number(item.quantidadeAtual) <= 0) btnNome.classList.add("sem-estoque");
     btnNome.textContent = item.nome || "Produto sem nome";
     btnNome.setAttribute("aria-expanded", "false");
 
@@ -519,14 +522,7 @@ function dataLocalISO() {
 function abrirModalVenda() {
   if (!el.modalVenda) return;
 
-  estado.itensVenda = [];
-  estado.idVendaAtual = gerarIdVendaCliente();
-  el.formVenda?.reset();
-  if (el.vendaData) el.vendaData.value = dataLocalISO();
-  if (el.statusVenda) {
-    el.statusVenda.hidden = true;
-    el.statusVenda.textContent = "";
-  }
+  if (!estado.idVendaAtual) estado.idVendaAtual = gerarIdVendaCliente();
   renderizarResultadosVenda();
   renderizarItensVenda();
 
@@ -536,6 +532,40 @@ function abrirModalVenda() {
     el.modalVenda.setAttribute("open", "");
   }
   el.vendaCliente?.focus();
+}
+
+function limparFichaVenda() {
+  el.formVenda?.reset();
+  estado.dataVendaPadrao = dataLocalISO();
+  if (el.vendaData) el.vendaData.value = estado.dataVendaPadrao;
+  estado.itensVenda = [];
+  estado.idVendaAtual = gerarIdVendaCliente();
+  if (el.statusVenda) {
+    el.statusVenda.hidden = true;
+    el.statusVenda.textContent = "";
+  }
+  renderizarResultadosVenda();
+  renderizarItensVenda();
+}
+
+function temRascunhoVenda() {
+  const camposPreenchidos = [
+    el.vendaCliente,
+    el.vendaEndereco,
+    el.vendaTelefone,
+    el.vendaVendedor,
+    el.vendaObservacao,
+  ].some((campo) => campo?.value.trim());
+  const dataAlterada = el.vendaData?.value && el.vendaData.value !== estado.dataVendaPadrao;
+  return camposPreenchidos || Boolean(dataAlterada) || estado.itensVenda.length > 0;
+}
+
+function protegerRecarregamento(evento) {
+  if (obterItensAlterados().length === 0 && !temRascunhoVenda()) return;
+
+  // O navegador apresenta o diálogo nativo de confirmação para recarga ou saída.
+  evento.preventDefault();
+  evento.returnValue = "";
 }
 
 function gerarIdVendaCliente() {
@@ -582,13 +612,14 @@ function renderizarResultadosVenda() {
   const fragmento = document.createDocumentFragment();
 
   for (const { item } of resultados) {
+    const semEstoque = Number(item.quantidadeAtual) <= 0;
     const li = document.createElement("li");
-    li.className = "resultado-venda";
+    li.className = `resultado-venda${semEstoque ? " sem-estoque" : ""}`;
 
     const dados = document.createElement("div");
     dados.className = "dados-produto-venda";
     const nome = document.createElement("div");
-    nome.className = "nome-produto-venda";
+    nome.className = `nome-produto-venda${semEstoque ? " nome-sem-estoque" : ""}`;
     nome.textContent = item.nome || "Produto sem nome";
     const detalhe = document.createElement("div");
     detalhe.className = "detalhe-produto-venda";
@@ -600,7 +631,12 @@ function renderizarResultadosVenda() {
     btnAdicionar.className = "btn-adicionar-produto";
     btnAdicionar.textContent = "Adicionar";
     btnAdicionar.setAttribute("aria-label", `Adicionar ${item.nome}${item.cor ? `, cor ${item.cor}` : ""}`);
-    btnAdicionar.addEventListener("click", () => adicionarProdutoAVenda(item));
+    btnAdicionar.disabled = semEstoque;
+    if (semEstoque) {
+      btnAdicionar.setAttribute("aria-label", `${item.nome}${item.cor ? `, cor ${item.cor}` : ""} sem unidades em estoque`);
+    } else {
+      btnAdicionar.addEventListener("click", () => adicionarProdutoAVenda(item));
+    }
 
     li.append(dados, btnAdicionar);
     fragmento.appendChild(li);
@@ -610,6 +646,8 @@ function renderizarResultadosVenda() {
 }
 
 function adicionarProdutoAVenda(item) {
+  if (Number(item.quantidadeAtual) <= 0) return;
+
   const existente = estado.itensVenda.find((produto) => produto.id === item.id);
   if (existente) {
     existente.quantidade += 1;
@@ -904,9 +942,8 @@ async function registrarVendaComSenha(senha) {
 
     estado.salvando = false;
     fecharModalSenha();
+    limparFichaVenda();
     fecharModalVenda();
-    estado.itensVenda = [];
-    estado.idVendaAtual = null;
     definirStatus("Venda registrada; atualizando estoque...", "ok");
     const estoqueCarregado = await carregarEstoque();
     if (estoqueCarregado) {
@@ -942,9 +979,17 @@ el.btnCancelarModal?.addEventListener("click", fecharModalSenha);
 el.formSalvar?.addEventListener("submit", salvarAlteracoesComSenha);
 el.btnAbrirVenda?.addEventListener("click", abrirModalVenda);
 el.btnFecharVenda?.addEventListener("click", fecharModalVenda);
+el.btnLimparVenda?.addEventListener("click", limparFichaVenda);
 el.btnCancelarVenda?.addEventListener("click", fecharModalVenda);
 el.buscaProdutoVenda?.addEventListener("input", renderizarResultadosVenda);
 el.formVenda?.addEventListener("submit", iniciarRegistroVenda);
+window.addEventListener("beforeunload", protegerRecarregamento);
+
+// Mantém o rascunho apenas durante a vida da página e descarta após atualização.
+limparFichaVenda();
+window.addEventListener("pageshow", (evento) => {
+  if (evento.persisted) limparFichaVenda();
+});
 
 // Garante que a imagem suma se o usuário soltar o dedo/mouse fora do botão
 document.addEventListener("pointerup", esconderImagem);
