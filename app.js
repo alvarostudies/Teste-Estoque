@@ -10,6 +10,9 @@ const estado = {
   avisoErroCarregamentoMostrado: false,
   carregando: false,
   salvando: false,
+  consultandoVendas: false,
+  idConsultaVendas: 0,
+  vendasCarregadas: [],
 };
 
 // Elementos do DOM
@@ -18,7 +21,9 @@ const el = {
   buscaNome: document.getElementById("busca-nome"),
   buscaCor: document.getElementById("busca-cor"),
   btnLimparFiltros: document.getElementById("btn-limpar-filtros"),
+  btnRecarregarEstoque: document.getElementById("btn-recarregar-estoque"),
   btnAlternarTema: document.getElementById("btn-alternar-tema"),
+  btnAbrirVendidos: document.getElementById("btn-abrir-vendidos"),
   btnAbrirVenda: document.getElementById("btn-abrir-venda"),
   corpoEstoque: document.getElementById("corpo-estoque"),
   mensagemVazia: document.getElementById("mensagem-vazia"),
@@ -60,6 +65,21 @@ const el = {
   btnFecharVenda: document.getElementById("btn-fechar-venda"),
   btnLimparVenda: document.getElementById("btn-limpar-venda"),
   btnCancelarVenda: document.getElementById("btn-cancelar-venda"),
+
+  modalVendidos: document.getElementById("modal-vendidos"),
+  descricaoVendidos: document.getElementById("descricao-vendidos"),
+  btnFecharVendidos: document.getElementById("btn-fechar-vendidos"),
+  btnCancelarVendidos: document.getElementById("btn-cancelar-vendidos"),
+  formVendidos: document.getElementById("form-vendidos"),
+  senhaVendidos: document.getElementById("senha-vendidos"),
+  erroVendidos: document.getElementById("erro-vendidos"),
+  btnConsultarVendidos: document.getElementById("btn-consultar-vendidos"),
+  conteudoVendidos: document.getElementById("conteudo-vendidos"),
+  filtroVendidosCliente: document.getElementById("filtro-vendidos-cliente"),
+  filtroVendidosMovel: document.getElementById("filtro-vendidos-movel"),
+  filtroVendidosData: document.getElementById("filtro-vendidos-data"),
+  mensagemVendidos: document.getElementById("mensagem-vendidos"),
+  listaVendidos: document.getElementById("lista-vendidos"),
 };
 
 // Cria um popup de aviso caso não exista no HTML (usado para o erro único de carregamento)
@@ -346,6 +366,29 @@ async function carregarEstoque() {
     atualizarBarraSalvar();
   }
   return carregouComSucesso;
+}
+
+async function recarregarEstoqueManualmente() {
+  if (estado.carregando || estado.salvando) return;
+  if (
+    obterItensAlterados().length > 0 &&
+    !window.confirm("Há alterações de estoque ainda não salvas. Recarregar descartará essas alterações. Deseja continuar?")
+  ) {
+    return;
+  }
+
+  if (el.btnRecarregarEstoque) {
+    el.btnRecarregarEstoque.disabled = true;
+    el.btnRecarregarEstoque.textContent = "Recarregando...";
+  }
+  try {
+    await carregarEstoque();
+  } finally {
+    if (el.btnRecarregarEstoque) {
+      el.btnRecarregarEstoque.disabled = false;
+      el.btnRecarregarEstoque.textContent = "Recarregar Estoque";
+    }
+  }
 }
 
 function renderizarTabela() {
@@ -764,6 +807,172 @@ function renderizarItensVenda() {
   el.itensVenda.appendChild(fragmento);
 }
 
+function limparConsultaVendidos() {
+  estado.idConsultaVendas += 1;
+  el.formVendidos?.reset();
+  if (el.formVendidos) el.formVendidos.hidden = false;
+  if (el.descricaoVendidos) el.descricaoVendidos.textContent = "Informe sua senha para consultar as vendas.";
+  if (el.erroVendidos) {
+    el.erroVendidos.hidden = true;
+    el.erroVendidos.textContent = "";
+  }
+  if (el.conteudoVendidos) el.conteudoVendidos.hidden = true;
+  if (el.filtroVendidosCliente) el.filtroVendidosCliente.value = "";
+  if (el.filtroVendidosMovel) el.filtroVendidosMovel.value = "";
+  if (el.filtroVendidosData) el.filtroVendidosData.value = "";
+  if (el.mensagemVendidos) el.mensagemVendidos.textContent = "";
+  if (el.listaVendidos) el.listaVendidos.innerHTML = "";
+  estado.vendasCarregadas = [];
+  estado.consultandoVendas = false;
+  if (el.btnConsultarVendidos) {
+    el.btnConsultarVendidos.disabled = false;
+    el.btnConsultarVendidos.textContent = "Ver vendas";
+  }
+}
+
+function abrirModalVendidos() {
+  if (!el.modalVendidos) return;
+  limparConsultaVendidos();
+  if (typeof el.modalVendidos.showModal === "function") {
+    el.modalVendidos.showModal();
+  } else {
+    el.modalVendidos.setAttribute("open", "");
+  }
+  el.senhaVendidos?.focus();
+}
+
+function fecharModalVendidos() {
+  if (typeof el.modalVendidos?.close === "function") {
+    el.modalVendidos.close();
+  } else {
+    el.modalVendidos?.removeAttribute("open");
+    limparConsultaVendidos();
+  }
+}
+
+async function consultarVendas(evento) {
+  evento.preventDefault();
+  if (estado.consultandoVendas) return;
+
+  const senha = el.senhaVendidos?.value.trim();
+  if (!senha) return;
+
+  estado.consultandoVendas = true;
+  const idConsulta = ++estado.idConsultaVendas;
+  el.erroVendidos.hidden = true;
+  el.btnConsultarVendidos.disabled = true;
+  el.btnConsultarVendidos.textContent = "Consultando...";
+
+  try {
+    const resposta = await fetch(WEB_APP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ acao: "listarvendas", senha }),
+    });
+    if (!resposta.ok) throw new Error(`HTTP ${resposta.status}`);
+
+    const resultado = await resposta.json();
+    if (idConsulta !== estado.idConsultaVendas) return;
+    el.senhaVendidos.value = "";
+    if (!resultado || resultado.ok !== true) {
+      el.erroVendidos.textContent = resultado?.mensagem || "Não foi possível consultar as vendas.";
+      el.erroVendidos.hidden = false;
+      return;
+    }
+
+    el.formVendidos.hidden = true;
+    el.descricaoVendidos.textContent = "Os produtos da mesma venda estão agrupados por cliente.";
+    el.conteudoVendidos.hidden = false;
+    estado.vendasCarregadas = Array.isArray(resultado.vendas) ? resultado.vendas : [];
+    renderizarVendas();
+  } catch (erro) {
+    if (idConsulta !== estado.idConsultaVendas) return;
+    console.error("Erro ao consultar vendas:", erro);
+    el.senhaVendidos.value = "";
+    el.erroVendidos.textContent = "Não foi possível consultar as vendas. Verifique a conexão e tente novamente.";
+    el.erroVendidos.hidden = false;
+  } finally {
+    if (idConsulta === estado.idConsultaVendas) {
+      estado.consultandoVendas = false;
+      el.btnConsultarVendidos.disabled = false;
+      el.btnConsultarVendidos.textContent = "Ver vendas";
+    }
+  }
+}
+
+function formatarDataHistorico(data) {
+  const partes = String(data || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return partes ? `${partes[3]}/${partes[2]}/${partes[1]}` : data || "Data não informada";
+}
+
+function renderizarVendas() {
+  el.listaVendidos.innerHTML = "";
+  if (estado.vendasCarregadas.length === 0) {
+    el.mensagemVendidos.textContent = "Nenhuma venda registrada.";
+    return;
+  }
+
+  const clienteBuscado = normalizar(el.filtroVendidosCliente?.value || "");
+  const movelBuscado = normalizar(el.filtroVendidosMovel?.value || "");
+  const dataBuscada = el.filtroVendidosData?.value || "";
+  const vendas = estado.vendasCarregadas.filter((venda) => {
+    const clienteCorresponde = !clienteBuscado || normalizar(venda.cliente || "").includes(clienteBuscado);
+    const movelCorresponde = !movelBuscado || (venda.itens || []).some((item) =>
+      normalizar(`${item.produto || ""} ${item.cor || ""}`).includes(movelBuscado)
+    );
+    const dataCorresponde = !dataBuscada || String(venda.data || "") === dataBuscada;
+    return clienteCorresponde && movelCorresponde && dataCorresponde;
+  });
+
+  if (vendas.length === 0) {
+    el.mensagemVendidos.textContent = "Nenhuma venda corresponde aos filtros.";
+    return;
+  }
+
+  el.mensagemVendidos.textContent = `${vendas.length} ${vendas.length === 1 ? "venda encontrada" : "vendas encontradas"}.`;
+  const fragmento = document.createDocumentFragment();
+
+  for (const venda of vendas) {
+    const cartao = document.createElement("li");
+    cartao.className = "venda-historico";
+
+    const cabecalho = document.createElement("div");
+    cabecalho.className = "venda-historico-cabecalho";
+    const titulo = document.createElement("h3");
+    titulo.textContent = venda.cliente || "Cliente não informado";
+    const data = document.createElement("time");
+    data.textContent = formatarDataHistorico(venda.data);
+    cabecalho.append(titulo, data);
+    cartao.appendChild(cabecalho);
+
+    const detalhes = [
+      venda.endereco && `Endereço: ${venda.endereco}`,
+      venda.telefone && `Telefone: ${venda.telefone}`,
+      venda.vendedor && `Vendedor: ${venda.vendedor}`,
+      venda.registradoPor && `Registrado por: ${venda.registradoPor}`,
+      venda.observacao && `Observação: ${venda.observacao}`,
+    ].filter(Boolean);
+    if (detalhes.length > 0) {
+      const paragrafo = document.createElement("p");
+      paragrafo.className = "venda-historico-detalhes";
+      paragrafo.textContent = detalhes.join(" · ");
+      cartao.appendChild(paragrafo);
+    }
+
+    const itens = document.createElement("ul");
+    itens.className = "venda-historico-itens";
+    for (const item of venda.itens || []) {
+      const linhaItem = document.createElement("li");
+      linhaItem.textContent = `${item.produto}${item.cor ? ` · ${item.cor}` : ""} — ${item.quantidade} ${item.quantidade === 1 ? "unidade" : "unidades"}`;
+      itens.appendChild(linhaItem);
+    }
+    cartao.appendChild(itens);
+    fragmento.appendChild(cartao);
+  }
+
+  el.listaVendidos.appendChild(fragmento);
+}
+
 function iniciarRegistroVenda(evento) {
   evento.preventDefault();
   if (!el.statusVenda || estado.salvando) return;
@@ -1006,11 +1215,20 @@ el.btnLimparFiltros?.addEventListener("click", () => {
   renderizarTabela();
 });
 
+el.btnRecarregarEstoque?.addEventListener("click", recarregarEstoqueManualmente);
 el.btnDescartar?.addEventListener("click", descartarAlteracoes);
 el.btnAbrirSalvar?.addEventListener("click", abrirModalSenha);
 el.btnCancelarModal?.addEventListener("click", fecharModalSenha);
 el.formSalvar?.addEventListener("submit", salvarAlteracoesComSenha);
 el.btnAlternarTema?.addEventListener("click", alternarTema);
+el.btnAbrirVendidos?.addEventListener("click", abrirModalVendidos);
+el.btnFecharVendidos?.addEventListener("click", fecharModalVendidos);
+el.btnCancelarVendidos?.addEventListener("click", fecharModalVendidos);
+el.formVendidos?.addEventListener("submit", consultarVendas);
+el.modalVendidos?.addEventListener("close", limparConsultaVendidos);
+el.filtroVendidosCliente?.addEventListener("input", renderizarVendas);
+el.filtroVendidosMovel?.addEventListener("input", renderizarVendas);
+el.filtroVendidosData?.addEventListener("input", renderizarVendas);
 el.btnAbrirVenda?.addEventListener("click", abrirModalVenda);
 el.btnFecharVenda?.addEventListener("click", fecharModalVenda);
 el.btnLimparVenda?.addEventListener("click", limparFichaVenda);

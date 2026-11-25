@@ -49,6 +49,12 @@
       <button type="button" id="btn-limpar-filtros" class="btn btn-secundario">
         Limpar
       </button>
+      <button type="button" id="btn-recarregar-estoque" class="btn btn-secundario">
+        Recarregar Estoque
+      </button>
+      <button type="button" id="btn-abrir-vendidos" class="btn btn-vendidos">
+        Vendidos
+      </button>
       <button type="button" id="btn-abrir-venda" class="btn btn-primario">
         Vender
       </button>
@@ -187,6 +193,50 @@
         <button type="submit" class="btn btn-primario">Registrar venda</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Popup protegido para consultar as vendas registradas. -->
+  <dialog id="modal-vendidos" class="modal-venda modal-vendidos" aria-labelledby="titulo-modal-vendidos">
+    <div class="modal-conteudo form-venda">
+      <div class="modal-venda-cabecalho">
+        <div>
+          <h2 id="titulo-modal-vendidos">Vendas realizadas</h2>
+          <p id="descricao-vendidos" class="modal-descricao">Informe sua senha para consultar as vendas.</p>
+        </div>
+        <button type="button" id="btn-fechar-vendidos" class="btn-fechar-modal" aria-label="Fechar vendas">×</button>
+      </div>
+
+      <form id="form-vendidos" class="vendas-autenticacao">
+        <div class="campo-modal">
+          <label for="senha-vendidos">Senha do funcionário</label>
+          <input type="password" id="senha-vendidos" autocomplete="off" required />
+        </div>
+        <p id="erro-vendidos" class="erro-senha" role="status" hidden></p>
+        <div class="modal-acoes">
+          <button type="button" id="btn-cancelar-vendidos" class="btn btn-secundario">Cancelar</button>
+          <button type="submit" id="btn-consultar-vendidos" class="btn btn-vendidos">Ver vendas</button>
+        </div>
+      </form>
+
+      <section id="conteudo-vendidos" class="conteudo-vendidos" aria-live="polite" hidden>
+        <div class="filtros-vendidos" aria-label="Filtros de vendas">
+          <div class="campo-modal">
+            <label for="filtro-vendidos-cliente">Nome do cliente</label>
+            <input type="search" id="filtro-vendidos-cliente" placeholder="Pesquisar cliente" autocomplete="off" />
+          </div>
+          <div class="campo-modal">
+            <label for="filtro-vendidos-movel">Móvel</label>
+            <input type="search" id="filtro-vendidos-movel" placeholder="Pesquisar móvel" autocomplete="off" />
+          </div>
+          <div class="campo-modal">
+            <label for="filtro-vendidos-data">Data</label>
+            <input type="date" id="filtro-vendidos-data" />
+          </div>
+        </div>
+        <p id="mensagem-vendidos" class="mensagem-vendidos"></p>
+        <ul id="lista-vendidos" class="lista-vendidos"></ul>
+      </section>
+    </div>
   </dialog>
 
   <!-- Modal de confirmação com senha do funcionário -->

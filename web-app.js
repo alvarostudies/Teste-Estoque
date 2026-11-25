@@ -92,6 +92,9 @@ function doPost(e) {
     }
 
     const ss = obterPlanilha();
+    if (acao === "listarvendas") {
+      return listarVendas(ss);
+    }
     if (acao === "vender") {
       return registrarVenda(ss, usuario, dados.venda);
     }
@@ -148,6 +151,75 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function listarVendas(ss) {
+  const abaVendas = ss.getSheetByName(ABA_VENDAS);
+  if (!abaVendas || abaVendas.getLastRow() < 2) {
+    return responderJson({ ok: true, vendas: [] });
+  }
+
+  const quantidadeColunas = Math.max(11, abaVendas.getLastColumn());
+  const linhas = abaVendas
+    .getRange(2, 1, abaVendas.getLastRow() - 1, quantidadeColunas)
+    .getValues();
+  const vendasPorChave = new Map();
+
+  for (const linha of linhas) {
+    const idVenda = String(linha[0] ?? "").trim();
+    const dataValor = linha[1];
+    const data = dataValor instanceof Date
+      ? Utilities.formatDate(dataValor, Session.getScriptTimeZone(), "yyyy-MM-dd")
+      : String(dataValor ?? "").trim();
+    const cliente = String(linha[2] ?? "").trim();
+    const endereco = String(linha[3] ?? "").trim();
+    const telefone = String(linha[4] ?? "").trim();
+    const observacao = String(linha[5] ?? "").trim();
+    const vendedor = String(linha[6] ?? "").trim();
+    const produto = String(linha[7] ?? "").trim();
+    const cor = String(linha[8] ?? "").trim();
+    const quantidade = Math.max(0, parseInt(linha[9], 10) || 0);
+    const registradoPor = String(linha[10] ?? "").trim();
+
+    if (!produto && !cliente) continue;
+
+    const telefoneNormalizado = String(telefone).replace(/\D/g, "");
+    const pessoa = telefoneNormalizado
+      ? `telefone:${telefoneNormalizado}`
+      : `cliente:${normalizarChaveVenda(cliente || endereco)}`;
+    const chave = idVenda
+      ? `id:${idVenda}|pessoa:${pessoa}`
+      : `legado:${[data, pessoa, telefone, endereco, vendedor].map(normalizarChaveVenda).join("|")}`;
+
+    if (!vendasPorChave.has(chave)) {
+      vendasPorChave.set(chave, {
+        idVenda,
+        data,
+        cliente,
+        endereco,
+        telefone,
+        observacao,
+        vendedor,
+        registradoPor,
+        itens: [],
+      });
+    }
+
+    if (produto) {
+      vendasPorChave.get(chave).itens.push({ produto, cor, quantidade });
+    }
+  }
+
+  return responderJson({ ok: true, vendas: Array.from(vendasPorChave.values()).reverse() });
+}
+
+function normalizarChaveVenda(valor) {
+  return String(valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("pt-BR");
 }
 
 function registrarVenda(ss, usuario, venda) {
