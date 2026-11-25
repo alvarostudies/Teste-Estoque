@@ -18,6 +18,7 @@ const el = {
   buscaNome: document.getElementById("busca-nome"),
   buscaCor: document.getElementById("busca-cor"),
   btnLimparFiltros: document.getElementById("btn-limpar-filtros"),
+  btnAlternarTema: document.getElementById("btn-alternar-tema"),
   btnAbrirVenda: document.getElementById("btn-abrir-venda"),
   corpoEstoque: document.getElementById("corpo-estoque"),
   mensagemVazia: document.getElementById("mensagem-vazia"),
@@ -115,6 +116,38 @@ function normalizar(texto = "") {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function definirTema(modoNoturno) {
+  const tema = modoNoturno ? "noturno" : "diurno";
+  document.body.dataset.tema = tema;
+  if (el.btnAlternarTema) {
+    const rotulo = modoNoturno ? "Ativar modo diurno" : "Ativar modo noturno";
+    el.btnAlternarTema.textContent = modoNoturno ? "☀" : "☾";
+    el.btnAlternarTema.setAttribute("aria-label", rotulo);
+    el.btnAlternarTema.title = rotulo;
+    el.btnAlternarTema.setAttribute("aria-pressed", String(modoNoturno));
+  }
+}
+
+function inicializarTema() {
+  let modoNoturno = false;
+  try {
+    modoNoturno = localStorage.getItem("tema-estoque") === "noturno";
+  } catch (erro) {
+    // A página continua funcionando mesmo se o navegador bloquear o armazenamento local.
+  }
+  definirTema(modoNoturno);
+}
+
+function alternarTema() {
+  const modoNoturno = document.body.dataset.tema !== "noturno";
+  definirTema(modoNoturno);
+  try {
+    localStorage.setItem("tema-estoque", modoNoturno ? "noturno" : "diurno");
+  } catch (erro) {
+    // A alternância permanece válida até a página ser fechada.
+  }
 }
 
 // Similaridade entre duas strings curtas (0 a 1) usando bigramas de caracteres
@@ -977,6 +1010,7 @@ el.btnDescartar?.addEventListener("click", descartarAlteracoes);
 el.btnAbrirSalvar?.addEventListener("click", abrirModalSenha);
 el.btnCancelarModal?.addEventListener("click", fecharModalSenha);
 el.formSalvar?.addEventListener("submit", salvarAlteracoesComSenha);
+el.btnAlternarTema?.addEventListener("click", alternarTema);
 el.btnAbrirVenda?.addEventListener("click", abrirModalVenda);
 el.btnFecharVenda?.addEventListener("click", fecharModalVenda);
 el.btnLimparVenda?.addEventListener("click", limparFichaVenda);
@@ -987,6 +1021,7 @@ window.addEventListener("beforeunload", protegerRecarregamento);
 
 // Mantém o rascunho apenas durante a vida da página e descarta após atualização.
 limparFichaVenda();
+inicializarTema();
 window.addEventListener("pageshow", (evento) => {
   if (evento.persisted) limparFichaVenda();
 });

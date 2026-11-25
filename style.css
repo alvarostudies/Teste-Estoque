@@ -13,6 +13,21 @@
   --shadow: 0 4px 16px rgba(17, 24, 39, 0.08);
 }
 
+body[data-tema="noturno"] {
+  color-scheme: dark;
+  --bg: #202124;
+  --surface: #2b2d31;
+  --surface-alt: #35383d;
+  --text: #e5e7eb;
+  --muted: #a1a1aa;
+  --border: #4b4f56;
+  --primary: #16a34a;
+  --primary-hover: #22c55e;
+  --accent: #93c5fd;
+  --danger: #f87171;
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -133,6 +148,28 @@ input:focus {
   touch-action: manipulation;
 }
 
+.btn-tema {
+  position: fixed;
+  right: 18px;
+  bottom: 96px;
+  z-index: 50;
+  width: 46px;
+  height: 46px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.btn-tema:hover {
+  background: var(--surface-alt);
+}
+
 .btn:active {
   transform: scale(0.98);
 }
@@ -147,12 +184,12 @@ input:focus {
 }
 
 .btn-secundario {
-  background: #e5e7eb;
+  background: var(--surface-alt);
   color: var(--text);
 }
 
 .btn-secundario:hover {
-  background: #d1d5db;
+  background: var(--border);
 }
 
 /* Painel da tabela (PC) */
@@ -301,7 +338,7 @@ input:focus {
 }
 
 .btn-qtd:hover {
-  background: #e5e7eb;
+  background: var(--border);
 }
 
 .btn-qtd:active {
@@ -673,6 +710,47 @@ input:focus {
   color: var(--accent);
   font-size: 0.88rem;
   font-weight: 600;
+}
+
+body[data-tema="noturno"] .badge {
+  background: #384252;
+}
+
+body[data-tema="noturno"] .tabela-estoque tbody tr.alterada {
+  background-color: #263a2f;
+}
+
+body[data-tema="noturno"] .nome-produto:hover,
+body[data-tema="noturno"] .nome-produto:focus-visible {
+  color: #bfdbfe;
+}
+
+body[data-tema="noturno"] .nome-produto.sem-estoque,
+body[data-tema="noturno"] .nome-produto.sem-estoque:hover,
+body[data-tema="noturno"] .nome-produto.sem-estoque:focus-visible {
+  color: #f87171;
+}
+
+body[data-tema="noturno"] .tag-cor.cor-br {
+  background: #d1d5db;
+  border-color: #9ca3af;
+}
+
+body[data-tema="noturno"] .btn-adicionar-produto {
+  color: #86efac;
+  border-color: #35634a;
+  background: #244331;
+}
+
+body[data-tema="noturno"] .btn-adicionar-produto:disabled {
+  color: #a1a1aa;
+  border-color: var(--border);
+  background: #3f434a;
+}
+
+body[data-tema="noturno"] .aviso-venda {
+  background: #493c20;
+  color: #fcd34d;
 }
 
 /* Responsividade para celular */
