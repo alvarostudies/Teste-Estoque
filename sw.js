@@ -1,5 +1,5 @@
 // A versão diferencia este cache dos anteriores e força a atualização dos arquivos locais.
-const CACHE_NAME = "estoque-loja-v4";
+const CACHE_NAME = "estoque-loja-v5";
 
 // Lista os arquivos da interface disponíveis mesmo quando o dispositivo estiver offline.
 const ARQUIVOS_ESTATICOS = [

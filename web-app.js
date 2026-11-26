@@ -6,6 +6,7 @@ const ABA_ESTOQUE = "Estoque";
 const ABA_USUARIOS = "Usuarios";
 const ABA_HISTORICO = "Historico";
 const ABA_VENDAS = "vendas";
+const ABA_AFAZERES = "Afazeres";
 
 // Escolhe a planilha ativa quando o script está vinculado a ela ou abre outra pelo ID.
 function obterPlanilha() {
@@ -21,10 +22,13 @@ function responderJson(objeto) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// Lê os produtos da aba "Estoque" (sem expor senhas ou aba Usuarios)
+// Lê o estoque ou a lista de afazeres sem expor dados da aba Usuarios.
 function doGet(e) {
   try {
     const ss = obterPlanilha();
+    const acao = String(e?.parameter?.acao ?? "").trim().toLowerCase();
+    if (acao === "listarafazeres") return listarAfazeres(ss);
+
     const aba = ss.getSheetByName(ABA_ESTOQUE);
     if (!aba) {
       return responderJson({ ok: false, mensagem: "Aba 'Estoque' não encontrada." });
@@ -71,7 +75,7 @@ function doGet(e) {
   }
 }
 
-// Roteia pedidos autenticados: consulta vendas, registra/edita venda ou salva estoque.
+// Roteia operações da lista de afazeres e operações de estoque/vendas protegidas por senha.
 function doPost(e) {
   // Serializa alterações simultâneas para evitar que duas vendas sobrescrevam o mesmo estoque.
   const lock = LockService.getScriptLock();
@@ -87,6 +91,10 @@ function doPost(e) {
     const alteracoes = Array.isArray(dados.alteracoes) ? dados.alteracoes : [];
     const acao = String(dados.acao ?? "salvar").trim().toLowerCase();
 
+    const ss = obterPlanilha();
+    if (acao === "adicionarafazer") return adicionarAfazer(ss, dados.texto);
+    if (acao === "removerafazer") return removerAfazer(ss, dados.id);
+
     if (!senhaInformada) {
       return responderJson({ ok: false, mensagem: "Informe a senha." });
     }
@@ -97,7 +105,6 @@ function doPost(e) {
       return responderJson({ ok: false, mensagem: "Senha incorreta ou funcionário inativo." });
     }
 
-    const ss = obterPlanilha();
     if (acao === "listarvendas") {
       return listarVendas(ss);
     }
@@ -167,6 +174,68 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// Cria a aba própria da lista quando ela ainda não existe e garante seus cabeçalhos.
+function obterAbaAfazeres(ss) {
+  let aba = ss.getSheetByName(ABA_AFAZERES);
+  if (!aba) aba = ss.insertSheet(ABA_AFAZERES);
+  if (aba.getLastRow() === 0 || !String(aba.getRange(1, 1).getValue() ?? "").trim()) {
+    aba.getRange(1, 1, 1, 3).setValues([["ID", "Afazer", "Criado em"]]);
+  }
+  return aba;
+}
+
+// Retorna os afazeres sem expor dados de outras abas nem exigir senha.
+function listarAfazeres(ss) {
+  const aba = obterAbaAfazeres(ss);
+  const ultimaLinha = aba.getLastRow();
+  if (ultimaLinha < 2) return responderJson({ ok: true, afazeres: [] });
+
+  const valores = aba.getRange(2, 1, ultimaLinha - 1, 3).getValues();
+  const afazeres = valores
+    .map((linha) => ({
+      id: String(linha[0] ?? "").trim(),
+      texto: String(linha[1] ?? "").trim(),
+    }))
+    .filter((afazer) => afazer.id && afazer.texto);
+  return responderJson({ ok: true, afazeres });
+}
+
+// Grava um novo afazer na aba própria sem passar pelo fluxo de senha dos funcionários.
+function adicionarAfazer(ss, textoRecebido) {
+  const texto = String(textoRecebido ?? "").trim();
+  if (!texto || texto.length > 500) {
+    return responderJson({ ok: false, mensagem: "Digite um afazer com até 500 caracteres." });
+  }
+
+  const aba = obterAbaAfazeres(ss);
+  const afazer = { id: Utilities.getUuid(), texto };
+  aba.getRange(aba.getLastRow() + 1, 1, 1, 3).setValues([[
+    afazer.id,
+    textoSeguroPlanilha(afazer.texto),
+    new Date(),
+  ]]);
+  return responderJson({ ok: true, afazer });
+}
+
+// Apaga apenas a linha que corresponde ao identificador solicitado.
+function removerAfazer(ss, idRecebido) {
+  const id = String(idRecebido ?? "").trim();
+  if (!id || id.length > 100) {
+    return responderJson({ ok: false, mensagem: "Afazer inválido." });
+  }
+
+  const aba = obterAbaAfazeres(ss);
+  const ultimaLinha = aba.getLastRow();
+  if (ultimaLinha < 2) return responderJson({ ok: false, mensagem: "O afazer não foi encontrado." });
+
+  const ids = aba.getRange(2, 1, ultimaLinha - 1, 1).getValues();
+  const indice = ids.findIndex(([idPlanilha]) => String(idPlanilha ?? "").trim() === id);
+  if (indice < 0) return responderJson({ ok: false, mensagem: "O afazer não foi encontrado. Recarregue a lista." });
+
+  aba.deleteRow(indice + 2);
+  return responderJson({ ok: true });
 }
 
 // Adiciona as cores enviadas; variantes existentes recebem a nova quantidade na mesma linha.

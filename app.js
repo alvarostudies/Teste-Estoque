@@ -23,6 +23,9 @@ const estado = {
   consultandoVendas: false,
   idConsultaVendas: 0,
   vendasCarregadas: [],
+  afazeres: [],
+  carregandoAfazeres: false,
+  salvandoAfazeres: false,
 };
 
 // Estado da interface. Quantidades e vendas são mantidas aqui como rascunhos até a confirmação.
@@ -30,6 +33,12 @@ const estado = {
 // Guarda referências aos elementos HTML para que as funções não precisem buscá-los repetidamente.
 const el = {
   statusConexao: document.getElementById("status-conexao"),
+  formAfazeres: document.getElementById("form-afazeres"),
+  novoAfazer: document.getElementById("novo-afazer"),
+  btnAdicionarAfazer: document.getElementById("btn-adicionar-afazer"),
+  statusAfazeres: document.getElementById("status-afazeres"),
+  contadorAfazeres: document.getElementById("contador-afazeres"),
+  listaAfazeres: document.getElementById("lista-afazeres"),
   buscaNome: document.getElementById("busca-nome"),
   buscaCor: document.getElementById("busca-cor"),
   btnLimparFiltros: document.getElementById("btn-limpar-filtros"),
@@ -412,6 +421,144 @@ async function carregarEstoque() {
     atualizarBarraSalvar();
   }
   return carregouComSucesso;
+}
+
+// Carrega a lista compartilhada de afazeres armazenada na aba própria da planilha.
+async function carregarAfazeres() {
+  if (!WEB_APP_URL || WEB_APP_URL.includes("SEU_ID_AQUI")) return;
+  estado.carregandoAfazeres = true;
+  atualizarControlesAfazeres();
+  definirStatusAfazeres("Carregando afazeres...");
+
+  try {
+    const resposta = await fetch(`${WEB_APP_URL}?acao=listarafazeres`, { cache: "no-store" });
+    if (!resposta.ok) throw new Error(`HTTP ${resposta.status}`);
+    const resultado = await resposta.json();
+    if (!resultado || resultado.ok !== true) {
+      throw new Error(resultado?.mensagem || "Não foi possível carregar os afazeres.");
+    }
+    estado.afazeres = Array.isArray(resultado.afazeres) ? resultado.afazeres : [];
+    renderizarAfazeres();
+    definirStatusAfazeres(estado.afazeres.length ? "" : "Nenhum afazer ainda.");
+  } catch (erro) {
+    console.error("Erro ao carregar afazeres:", erro);
+    definirStatusAfazeres("Não foi possível carregar a lista. Tente recarregar a página.", "erro");
+  } finally {
+    estado.carregandoAfazeres = false;
+    atualizarControlesAfazeres();
+  }
+}
+
+function definirStatusAfazeres(texto, tipo = "info") {
+  if (!el.statusAfazeres) return;
+  el.statusAfazeres.textContent = texto;
+  el.statusAfazeres.dataset.tipo = tipo;
+  el.statusAfazeres.hidden = !texto;
+}
+
+function atualizarControlesAfazeres() {
+  const desabilitado = estado.salvandoAfazeres || estado.carregandoAfazeres;
+  if (el.btnAdicionarAfazer) el.btnAdicionarAfazer.disabled = desabilitado;
+  el.listaAfazeres?.querySelectorAll(".btn-apagar-afazer").forEach((botao) => {
+    botao.disabled = desabilitado;
+  });
+}
+
+// Desenha os itens usando textContent para tratar o texto como conteúdo, nunca como HTML.
+function renderizarAfazeres() {
+  if (!el.listaAfazeres) return;
+  el.listaAfazeres.replaceChildren();
+  const itens = Array.isArray(estado.afazeres) ? estado.afazeres : [];
+
+  if (el.contadorAfazeres) {
+    el.contadorAfazeres.textContent = `${itens.length} ${itens.length === 1 ? "item" : "itens"}`;
+  }
+
+  for (const afazer of itens) {
+    const linha = document.createElement("li");
+    linha.className = "item-afazer";
+
+    const texto = document.createElement("span");
+    texto.className = "texto-afazer";
+    texto.textContent = afazer.texto;
+
+    const apagar = document.createElement("button");
+    apagar.type = "button";
+    apagar.className = "btn-apagar-afazer";
+    apagar.setAttribute("aria-label", `Apagar afazer: ${afazer.texto}`);
+    apagar.title = "Apagar afazer";
+    apagar.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 14h12l1-14M9 7V4h6v3"/></svg>';
+    apagar.addEventListener("click", () => removerAfazer(afazer.id));
+
+    linha.append(texto, apagar);
+    el.listaAfazeres.appendChild(linha);
+  }
+  atualizarControlesAfazeres();
+}
+
+async function enviarAcaoAfazer(dados) {
+  const resposta = await fetch(WEB_APP_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(dados),
+  });
+  if (!resposta.ok) throw new Error(`HTTP ${resposta.status}`);
+  return resposta.json();
+}
+
+// Adiciona um afazer sem solicitar senha e salva a alteração na planilha.
+async function adicionarAfazer(evento) {
+  evento.preventDefault();
+  if (estado.salvandoAfazeres || estado.carregandoAfazeres || !el.novoAfazer) return;
+  const texto = el.novoAfazer.value.trim();
+  if (!texto) {
+    el.novoAfazer.focus();
+    return;
+  }
+
+  estado.salvandoAfazeres = true;
+  atualizarControlesAfazeres();
+  definirStatusAfazeres("Adicionando afazer...");
+  try {
+    const resultado = await enviarAcaoAfazer({ acao: "adicionarafazer", texto });
+    if (!resultado || resultado.ok !== true || !resultado.afazer) {
+      throw new Error(resultado?.mensagem || "Não foi possível adicionar o afazer.");
+    }
+    estado.afazeres.push(resultado.afazer);
+    el.novoAfazer.value = "";
+    renderizarAfazeres();
+    definirStatusAfazeres("Afazer adicionado.", "ok");
+    el.novoAfazer.focus();
+  } catch (erro) {
+    console.error("Erro ao adicionar afazer:", erro);
+    definirStatusAfazeres(erro.message || "Não foi possível adicionar o afazer. Tente novamente.", "erro");
+  } finally {
+    estado.salvandoAfazeres = false;
+    atualizarControlesAfazeres();
+  }
+}
+
+// Apaga somente o item selecionado, também sem solicitar senha.
+async function removerAfazer(id) {
+  if (estado.salvandoAfazeres || estado.carregandoAfazeres || !id) return;
+  estado.salvandoAfazeres = true;
+  atualizarControlesAfazeres();
+  definirStatusAfazeres("Apagando afazer...");
+  try {
+    const resultado = await enviarAcaoAfazer({ acao: "removerafazer", id });
+    if (!resultado || resultado.ok !== true) {
+      throw new Error(resultado?.mensagem || "Não foi possível apagar o afazer.");
+    }
+    estado.afazeres = estado.afazeres.filter((afazer) => afazer.id !== id);
+    renderizarAfazeres();
+    definirStatusAfazeres(estado.afazeres.length ? "Afazer apagado." : "Nenhum afazer ainda.", "ok");
+  } catch (erro) {
+    console.error("Erro ao apagar afazer:", erro);
+    definirStatusAfazeres(erro.message || "Não foi possível apagar o afazer. Tente novamente.", "erro");
+  } finally {
+    estado.salvandoAfazeres = false;
+    atualizarControlesAfazeres();
+  }
 }
 
 // Faz uma recarga solicitada pelo usuário e protege alterações locais ainda não salvas.
@@ -1859,6 +2006,7 @@ async function editarVendaComSenha(senha) {
 // Eventos gerais: conecta os controles da página às funções de consulta, edição e gravação.
 el.buscaNome?.addEventListener("input", renderizarTabela);
 el.buscaCor?.addEventListener("input", renderizarTabela);
+el.formAfazeres?.addEventListener("submit", adicionarAfazer);
 
 el.btnLimparFiltros?.addEventListener("click", () => {
   if (el.buscaNome) el.buscaNome.value = "";
@@ -1947,3 +2095,4 @@ document.addEventListener("pointercancel", esconderImagem);
 
 // Carrega o estoque inicial assim que o app é iniciado.
 carregarEstoque();
+carregarAfazeres();

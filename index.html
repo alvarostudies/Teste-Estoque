@@ -24,6 +24,26 @@
   </header>
 
   <main class="container">
+    <!-- Lista compartilhada de afazeres, armazenada em uma aba própria da planilha. -->
+    <section class="painel-afazeres" aria-labelledby="titulo-afazeres">
+      <div class="cabecalho-afazeres">
+        <div>
+          <h2 id="titulo-afazeres">Lista de afazeres</h2>
+          <p>Adicione tarefas para a equipe acompanhar.</p>
+        </div>
+        <span id="contador-afazeres" class="contador-afazeres">0 itens</span>
+      </div>
+
+      <form id="form-afazeres" class="form-afazeres">
+        <label class="sr-only" for="novo-afazer">Novo afazer</label>
+        <input type="text" id="novo-afazer" maxlength="500" placeholder="O que precisa ser feito?" autocomplete="off" />
+        <button type="submit" id="btn-adicionar-afazer" class="btn btn-primario btn-adicionar-afazer" aria-label="Adicionar afazer" title="Adicionar afazer">+</button>
+      </form>
+
+      <p id="status-afazeres" class="status-afazeres" role="status" aria-live="polite">Carregando afazeres...</p>
+      <ul id="lista-afazeres" class="lista-afazeres" aria-label="Afazeres cadastrados"></ul>
+    </section>
+
     <!-- Filtros de busca -->
     <section class="filtros" aria-label="Filtros de pesquisa">
       <div class="campo-filtro">
