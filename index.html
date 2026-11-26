@@ -46,21 +46,29 @@
         />
       </div>
 
-      <button type="button" id="btn-limpar-filtros" class="btn btn-secundario">
-        Limpar
-      </button>
-      <button type="button" id="btn-recarregar-estoque" class="btn btn-secundario">
-        Recarregar Estoque
-      </button>
-      <button type="button" id="btn-abrir-vendidos" class="btn btn-vendidos">
-        Vendidos
-      </button>
-      <button type="button" id="btn-abrir-editar-venda" class="btn btn-editar-venda">
-        Editar Venda
-      </button>
-      <button type="button" id="btn-abrir-venda" class="btn btn-primario">
-        Vender
-      </button>
+      <div class="acoes-filtro">
+        <button type="button" id="btn-limpar-filtros" class="btn btn-secundario">
+          Limpar
+        </button>
+        <button type="button" id="btn-recarregar-estoque" class="btn btn-secundario">
+          Recarregar Estoque
+        </button>
+        <button type="button" id="btn-abrir-vendidos" class="btn btn-vendidos">
+          Vendidos
+        </button>
+        <button type="button" id="btn-abrir-editar-venda" class="btn btn-editar-venda">
+          Editar Venda
+        </button>
+        <button type="button" id="btn-abrir-venda" class="btn btn-primario">
+          Vender
+        </button>
+        <button type="button" id="btn-abrir-adicionar-produto" class="btn btn-adicionar-novo">
+          Adicionar Produto
+        </button>
+        <button type="button" id="btn-abrir-remover-produto" class="btn btn-remover-produto">
+          Remover Produto
+        </button>
+      </div>
     </section>
 
     <!-- Tabela / Lista responsiva de produtos -->
@@ -196,6 +204,74 @@
         <button type="submit" id="btn-salvar-venda" class="btn btn-primario">Registrar venda</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Popup para cadastrar um produto e suas variantes de cor. -->
+  <dialog id="modal-adicionar-produto" class="modal-venda modal-produto" aria-labelledby="titulo-modal-adicionar-produto">
+    <form id="form-adicionar-produto" class="modal-conteudo form-venda">
+      <div class="modal-venda-cabecalho">
+        <div>
+          <h2 id="titulo-modal-adicionar-produto">Adicionar Produto</h2>
+          <p class="modal-descricao">Informe os dados do produto. A quantidade será aplicada a cada cor.</p>
+        </div>
+        <button type="button" id="btn-fechar-adicionar-produto" class="btn-fechar-modal" aria-label="Fechar cadastro de produto">×</button>
+      </div>
+
+      <div class="dados-produto-grid">
+        <div class="campo-modal">
+          <label for="novo-produto-nome">Nome do produto</label>
+          <input type="text" id="novo-produto-nome" maxlength="150" autocomplete="off" required />
+        </div>
+        <div class="campo-modal">
+          <label for="novo-produto-cores">Cores</label>
+          <input type="text" id="novo-produto-cores" maxlength="500" placeholder="Ex.: BR, CN, CN/OFF" autocomplete="off" required />
+          <small>Separe as cores por vírgula.</small>
+        </div>
+        <div class="campo-modal">
+          <label for="novo-produto-quantidade">Quantidade por cor</label>
+          <input type="number" id="novo-produto-quantidade" min="0" step="1" inputmode="numeric" required />
+        </div>
+        <div class="campo-modal">
+          <label for="novo-produto-imagem">Link para foto (opcional)</label>
+          <input type="url" id="novo-produto-imagem" maxlength="2000" placeholder="https://..." autocomplete="url" />
+        </div>
+      </div>
+
+      <p id="status-adicionar-produto" class="status-venda" role="status" hidden></p>
+      <div class="modal-acoes">
+        <button type="button" id="btn-cancelar-adicionar-produto" class="btn btn-secundario">Cancelar</button>
+        <button type="submit" id="btn-continuar-adicionar-produto" class="btn btn-adicionar-novo">Continuar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Popup de busca e seleção de um produto para remoção. -->
+  <dialog id="modal-remover-produto" class="modal-venda modal-produto" aria-labelledby="titulo-modal-remover-produto">
+    <div class="modal-conteudo form-venda">
+      <div class="modal-venda-cabecalho">
+        <div>
+          <h2 id="titulo-modal-remover-produto">Remover Produto</h2>
+          <p class="modal-descricao">Pesquise pelo nome ou por uma cor e selecione o produto. Todas as cores dele serão removidas.</p>
+        </div>
+        <button type="button" id="btn-fechar-remover-produto" class="btn-fechar-modal" aria-label="Fechar remoção de produto">×</button>
+      </div>
+
+      <div class="campo-modal">
+        <label for="busca-produto-remover">Pesquisar produto</label>
+        <input type="search" id="busca-produto-remover" placeholder="Digite o nome ou a cor" autocomplete="off" />
+      </div>
+      <p id="mensagem-produtos-remover" class="mensagem-venda" aria-live="polite">Digite para pesquisar os produtos do estoque.</p>
+      <ul id="resultados-produtos-remover" class="lista-produtos-remover" aria-live="polite"></ul>
+
+      <section id="produto-selecionado-remover" class="produto-selecionado-remover" aria-live="polite" hidden>
+        <h3 id="nome-selecionado-remover"></h3>
+        <p id="detalhes-selecionado-remover"></p>
+        <div class="modal-acoes">
+          <button type="button" id="btn-cancelar-remover-produto" class="btn btn-secundario">Cancelar</button>
+          <button type="button" id="btn-confirmar-remover-produto" class="btn btn-remover-produto">Remover produto</button>
+        </div>
+      </section>
+    </div>
   </dialog>
 
   <!-- Popup protegido para consultar as vendas registradas. -->

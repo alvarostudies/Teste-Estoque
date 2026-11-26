@@ -1,6 +1,7 @@
 // Substitua pela URL /exec do seu Google Apps Script (Web App)
 const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw6qXvKfxN1c1w8M9qK44Nmdgt5uPsakc03al4IXXR42YesssC_lbPUuWbTHeFzjtasvQ/exec";
 
+// Centraliza o estado da tela: estoque, rascunhos de vendas e operações em andamento.
 const estado = {
   itens: [], // { id, linha, nome, cor, quantidadeOriginal, quantidadeAtual, imagem }
   itensVenda: [], // Itens da venda em preparação no popup.
@@ -14,6 +15,8 @@ const estado = {
   modoVendas: "consulta",
   preservarConsultaAoFechar: false,
   operacaoSenha: null,
+  produtoPendente: null,
+  produtoSelecionadoRemover: null,
   avisoErroCarregamentoMostrado: false,
   carregando: false,
   salvando: false,
@@ -22,7 +25,9 @@ const estado = {
   vendasCarregadas: [],
 };
 
+// Estado da interface. Quantidades e vendas são mantidas aqui como rascunhos até a confirmação.
 // Elementos do DOM
+// Guarda referências aos elementos HTML para que as funções não precisem buscá-los repetidamente.
 const el = {
   statusConexao: document.getElementById("status-conexao"),
   buscaNome: document.getElementById("busca-nome"),
@@ -33,6 +38,8 @@ const el = {
   btnAbrirVendidos: document.getElementById("btn-abrir-vendidos"),
   btnAbrirEdicaoVenda: document.getElementById("btn-abrir-editar-venda"),
   btnAbrirVenda: document.getElementById("btn-abrir-venda"),
+  btnAbrirAdicionarProduto: document.getElementById("btn-abrir-adicionar-produto"),
+  btnAbrirRemoverProduto: document.getElementById("btn-abrir-remover-produto"),
   corpoEstoque: document.getElementById("corpo-estoque"),
   mensagemVazia: document.getElementById("mensagem-vazia"),
 
@@ -54,6 +61,27 @@ const el = {
   erroSenha: document.getElementById("erro-senha"),
   btnCancelarModal: document.getElementById("btn-cancelar-modal"),
   btnConfirmarSalvar: document.getElementById("btn-confirmar-salvar"),
+
+  modalAdicionarProduto: document.getElementById("modal-adicionar-produto"),
+  formAdicionarProduto: document.getElementById("form-adicionar-produto"),
+  novoProdutoNome: document.getElementById("novo-produto-nome"),
+  novoProdutoCores: document.getElementById("novo-produto-cores"),
+  novoProdutoQuantidade: document.getElementById("novo-produto-quantidade"),
+  novoProdutoImagem: document.getElementById("novo-produto-imagem"),
+  statusAdicionarProduto: document.getElementById("status-adicionar-produto"),
+  btnFecharAdicionarProduto: document.getElementById("btn-fechar-adicionar-produto"),
+  btnCancelarAdicionarProduto: document.getElementById("btn-cancelar-adicionar-produto"),
+
+  modalRemoverProduto: document.getElementById("modal-remover-produto"),
+  buscaProdutoRemover: document.getElementById("busca-produto-remover"),
+  mensagemProdutosRemover: document.getElementById("mensagem-produtos-remover"),
+  resultadosProdutosRemover: document.getElementById("resultados-produtos-remover"),
+  produtoSelecionadoRemover: document.getElementById("produto-selecionado-remover"),
+  nomeSelecionadoRemover: document.getElementById("nome-selecionado-remover"),
+  detalhesSelecionadoRemover: document.getElementById("detalhes-selecionado-remover"),
+  btnFecharRemoverProduto: document.getElementById("btn-fechar-remover-produto"),
+  btnCancelarRemoverProduto: document.getElementById("btn-cancelar-remover-produto"),
+  btnConfirmarRemoverProduto: document.getElementById("btn-confirmar-remover-produto"),
 
   modalVenda: document.getElementById("modal-venda"),
   formVenda: document.getElementById("form-venda"),
@@ -95,6 +123,7 @@ const el = {
 // Cria um popup de aviso caso não exista no HTML (usado para o erro único de carregamento)
 const modalAvisoErro = criarModalAvisoErro();
 
+// Cria uma única caixa de aviso para falhas ao carregar a planilha.
 function criarModalAvisoErro() {
   const dialog = document.createElement("dialog");
   dialog.className = "modal-senha";
@@ -118,6 +147,7 @@ function criarModalAvisoErro() {
   return dialog;
 }
 
+// Evita abrir repetidamente o aviso de erro durante várias tentativas de carregamento.
 function mostrarAvisoErroCarregamentoUnico() {
   if (estado.avisoErroCarregamentoMostrado) return;
   estado.avisoErroCarregamentoMostrado = true;
@@ -129,6 +159,7 @@ function mostrarAvisoErroCarregamentoUnico() {
   }
 }
 
+// Atualiza o indicador de conexão com uma mensagem e cor coerentes com o resultado.
 function definirStatus(texto, tipo = "info") {
   if (!el.statusConexao) return;
   el.statusConexao.textContent = texto;
@@ -148,6 +179,7 @@ function normalizar(texto = "") {
     .trim();
 }
 
+// Aplica o tema escolhido ao documento e mantém o rótulo acessível do botão atualizado.
 function definirTema(modoNoturno) {
   const tema = modoNoturno ? "noturno" : "diurno";
   document.body.dataset.tema = tema;
@@ -160,6 +192,7 @@ function definirTema(modoNoturno) {
   }
 }
 
+// Recupera do armazenamento local a preferência de tema usada na última visita.
 function inicializarTema() {
   let modoNoturno = false;
   try {
@@ -170,6 +203,7 @@ function inicializarTema() {
   definirTema(modoNoturno);
 }
 
+// Alterna entre os temas claro e escuro e grava a preferência no navegador.
 function alternarTema() {
   const modoNoturno = document.body.dataset.tema !== "noturno";
   definirTema(modoNoturno);
@@ -257,6 +291,7 @@ function pontuarCampo(valorCampo, termoBusca) {
   return { match: false, score: 0 };
 }
 
+// Filtra os produtos da tabela por nome e cor e ordena os resultados por proximidade.
 function obterItensFiltradosEOrdenados() {
   const termoNome = normalizar(el.buscaNome?.value || "");
   const termoCor = normalizar(el.buscaCor?.value || "");
@@ -336,6 +371,7 @@ function normalizarDadosPlanilha(payload) {
   });
 }
 
+// Busca a lista atual do estoque no Web App e redesenha a tabela com os dados recebidos.
 async function carregarEstoque() {
   if (!WEB_APP_URL || WEB_APP_URL.includes("SEU_ID_AQUI")) {
     definirStatus("Configure a URL do Web App", "erro");
@@ -378,6 +414,7 @@ async function carregarEstoque() {
   return carregouComSucesso;
 }
 
+// Faz uma recarga solicitada pelo usuário e protege alterações locais ainda não salvas.
 async function recarregarEstoqueManualmente() {
   if (estado.carregando || estado.salvando) return;
   if (
@@ -401,6 +438,7 @@ async function recarregarEstoqueManualmente() {
   }
 }
 
+// Constrói as linhas da tabela de estoque e liga os controles de quantidade e imagem.
 function renderizarTabela() {
   esconderImagem();
   el.corpoEstoque.innerHTML = "";
@@ -533,6 +571,7 @@ function renderizarTabela() {
   el.corpoEstoque.appendChild(fragmento);
 }
 
+// Ajusta a quantidade temporária de um produto, sem permitir valores abaixo de zero.
 function alterarQuantidade(id, delta) {
   const item = estado.itens.find((i) => i.id === id);
   if (!item) return;
@@ -546,12 +585,14 @@ function alterarQuantidade(id, delta) {
   atualizarBarraSalvar();
 }
 
+// Retorna apenas os produtos cuja quantidade difere da última quantidade confirmada.
 function obterItensAlterados() {
   return estado.itens.filter(
     (item) => item.quantidadeAtual !== item.quantidadeOriginal
   );
 }
 
+// Exibe ou oculta a barra inferior de salvar conforme existam alterações no estoque.
 function atualizarBarraSalvar() {
   const alterados = obterItensAlterados();
   const total = alterados.length;
@@ -565,12 +606,177 @@ function atualizarBarraSalvar() {
   el.barraSalvar.classList.add("visivel");
 }
 
+// Desfaz todas as alterações de estoque ainda não enviadas ao servidor.
 function descartarAlteracoes() {
   for (const item of estado.itens) {
     item.quantidadeAtual = item.quantidadeOriginal;
   }
   renderizarTabela();
   atualizarBarraSalvar();
+}
+
+// Bloqueia operações estruturais enquanto existirem quantidades locais ainda não salvas.
+function verificarSemAlteracoesPendentes() {
+  if (obterItensAlterados().length === 0) return true;
+  window.alert("Salve ou descarte as alterações de quantidade antes de adicionar ou remover produtos.");
+  return false;
+}
+
+function abrirModalAdicionarProduto() {
+  if (!verificarSemAlteracoesPendentes()) return;
+  if (el.statusAdicionarProduto) {
+    el.statusAdicionarProduto.hidden = true;
+    el.statusAdicionarProduto.textContent = "";
+  }
+  if (typeof el.modalAdicionarProduto.showModal === "function") el.modalAdicionarProduto.showModal();
+  else el.modalAdicionarProduto.setAttribute("open", "");
+  el.novoProdutoNome.focus();
+}
+
+function fecharModalAdicionarProduto() {
+  if (typeof el.modalAdicionarProduto.close === "function") el.modalAdicionarProduto.close();
+  else el.modalAdicionarProduto.removeAttribute("open");
+}
+
+function abrirModalRemoverProduto() {
+  if (!verificarSemAlteracoesPendentes()) return;
+  estado.produtoSelecionadoRemover = null;
+  el.buscaProdutoRemover.value = "";
+  renderizarResultadosRemocao();
+  if (typeof el.modalRemoverProduto.showModal === "function") el.modalRemoverProduto.showModal();
+  else el.modalRemoverProduto.setAttribute("open", "");
+  el.buscaProdutoRemover.focus();
+}
+
+function fecharModalRemoverProduto() {
+  if (typeof el.modalRemoverProduto.close === "function") el.modalRemoverProduto.close();
+  else el.modalRemoverProduto.removeAttribute("open");
+}
+
+// Agrupa as linhas da planilha por produto, mantendo juntas todas as variantes de cor.
+function obterProdutosAgrupados() {
+  const grupos = new Map();
+  for (const item of estado.itens) {
+    const chave = normalizar(item.nome);
+    if (!chave) continue;
+    if (!grupos.has(chave)) grupos.set(chave, { nome: item.nome, variantes: [], quantidadeTotal: 0 });
+    const grupo = grupos.get(chave);
+    grupo.variantes.push(item);
+    grupo.quantidadeTotal += item.quantidadeAtual;
+  }
+  return Array.from(grupos.values()).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+}
+
+function descreverVariantesProduto(grupo) {
+  return grupo.variantes.map((item) => `${item.cor || "Sem cor"} (${item.quantidadeAtual})`).join(", ");
+}
+
+// Pesquisa pelo nome ou pelas cores e permite escolher o produto completo para remoção.
+function renderizarResultadosRemocao() {
+  const termo = normalizar(el.buscaProdutoRemover.value);
+  el.resultadosProdutosRemover.innerHTML = "";
+  el.produtoSelecionadoRemover.hidden = !estado.produtoSelecionadoRemover;
+  if (estado.produtoSelecionadoRemover) {
+    el.nomeSelecionadoRemover.textContent = estado.produtoSelecionadoRemover.nome;
+    el.detalhesSelecionadoRemover.textContent =
+      `Cores: ${descreverVariantesProduto(estado.produtoSelecionadoRemover)}. ` +
+      `Total em estoque: ${estado.produtoSelecionadoRemover.quantidadeTotal}.`;
+  }
+
+  if (!termo) {
+    el.mensagemProdutosRemover.textContent = "Digite para pesquisar os produtos do estoque.";
+    return;
+  }
+
+  const resultados = obterProdutosAgrupados().filter((grupo) =>
+    normalizar(grupo.nome).includes(termo) ||
+    grupo.variantes.some((item) => normalizar(item.cor).includes(termo))
+  );
+  if (resultados.length === 0) {
+    el.mensagemProdutosRemover.textContent = "Nenhum produto encontrado.";
+    return;
+  }
+
+  el.mensagemProdutosRemover.textContent = resultados.length > 30
+    ? `Mostrando os primeiros 30 de ${resultados.length} resultados.`
+    : `${resultados.length} produto(s) encontrado(s).`;
+  const fragmento = document.createDocumentFragment();
+  for (const grupo of resultados.slice(0, 30)) {
+    const linha = document.createElement("li");
+    linha.className = "produto-remover-resultado";
+    const dados = document.createElement("div");
+    dados.className = "produto-remover-dados";
+    const nome = document.createElement("p");
+    nome.className = "produto-remover-nome";
+    nome.textContent = grupo.nome;
+    const detalhe = document.createElement("p");
+    detalhe.className = "produto-remover-detalhe";
+    detalhe.textContent = `${grupo.variantes.length} cor(es) · ${descreverVariantesProduto(grupo)}`;
+    dados.append(nome, detalhe);
+
+    const botao = document.createElement("button");
+    botao.type = "button";
+    botao.className = "btn btn-secundario";
+    botao.textContent = "Selecionar";
+    botao.addEventListener("click", () => {
+      estado.produtoSelecionadoRemover = grupo;
+      renderizarResultadosRemocao();
+    });
+    linha.append(dados, botao);
+    fragmento.appendChild(linha);
+  }
+  el.resultadosProdutosRemover.appendChild(fragmento);
+}
+
+// Valida o formulário e encaminha os dados para confirmação por senha.
+function iniciarAdicaoProduto(evento) {
+  evento.preventDefault();
+  if (!verificarSemAlteracoesPendentes()) return;
+
+  const nome = el.novoProdutoNome.value.trim();
+  const cores = el.novoProdutoCores.value
+    .split(/[,;\n]+/)
+    .map((cor) => cor.trim())
+    .filter(Boolean)
+    .filter((cor, indice, todas) => todas.findIndex((outra) => normalizar(outra) === normalizar(cor)) === indice);
+  const quantidade = Number(el.novoProdutoQuantidade.value);
+  const imagem = el.novoProdutoImagem.value.trim();
+
+  if (!nome || nome.length > 150 || cores.length === 0 || cores.length > 50) {
+    el.statusAdicionarProduto.textContent = "Informe o nome e de 1 a 50 cores válidas.";
+    el.statusAdicionarProduto.hidden = false;
+    return;
+  }
+  if (!el.novoProdutoQuantidade.value || !Number.isSafeInteger(quantidade) || quantidade < 0) {
+    el.statusAdicionarProduto.textContent = "A quantidade deve ser um número inteiro igual ou maior que zero.";
+    el.statusAdicionarProduto.hidden = false;
+    return;
+  }
+  if (imagem) {
+    let urlValida = false;
+    try {
+      const url = new URL(imagem);
+      urlValida = url.protocol === "http:" || url.protocol === "https:";
+    } catch (erro) {
+      urlValida = false;
+    }
+    if (!urlValida) {
+      el.statusAdicionarProduto.textContent = "O link da foto deve começar com http:// ou https://.";
+      el.statusAdicionarProduto.hidden = false;
+      return;
+    }
+  }
+
+  estado.produtoPendente = { nome, cores, quantidade, imagem };
+  fecharModalAdicionarProduto();
+  abrirModalSenha("adicionarProduto");
+}
+
+function iniciarRemocaoProduto() {
+  if (!estado.produtoSelecionadoRemover || !verificarSemAlteracoesPendentes()) return;
+  estado.produtoPendente = { nome: estado.produtoSelecionadoRemover.nome };
+  fecharModalRemoverProduto();
+  abrirModalSenha("removerProduto");
 }
 
 // Exibição da imagem do produto enquanto toca/segura ou passa o cursor
@@ -588,6 +794,7 @@ function mostrarImagem(item) {
   el.previewImagem.setAttribute("aria-hidden", "false");
 }
 
+// Fecha o cartão de imagem e limpa seu endereço para encerrar a pré-visualização.
 function esconderImagem() {
   if (!el.previewImagem) return;
   el.previewImagem.classList.remove("visivel");
@@ -597,6 +804,7 @@ function esconderImagem() {
   }
 }
 
+// Produz a data de hoje no formato ISO local exigido pelo campo de data HTML.
 function dataLocalISO() {
   const hoje = new Date();
   const ano = hoje.getFullYear();
@@ -605,6 +813,7 @@ function dataLocalISO() {
   return `${ano}-${mes}-${dia}`;
 }
 
+// Prepara e abre uma venda nova, restaurando um rascunho temporário se existir.
 function abrirNovaVenda() {
   if (estado.rascunhoNovaVenda) restaurarRascunhoNovaVenda();
   estado.modoFormularioVenda = "nova";
@@ -614,6 +823,7 @@ function abrirNovaVenda() {
   abrirModalVenda();
 }
 
+// Abre o formulário compartilhado por venda nova e edição de venda existente.
 function abrirModalVenda() {
   if (!el.modalVenda) return;
 
@@ -631,6 +841,7 @@ function abrirModalVenda() {
   el.vendaCliente?.focus();
 }
 
+// Ajusta título, botão de envio e aviso conforme o formulário esteja criando ou editando.
 function definirModoFormularioVenda() {
   const editando = estado.modoFormularioVenda === "editar";
   if (el.tituloModalVenda) el.tituloModalVenda.textContent = editando ? "Editar venda" : "Nova venda";
@@ -644,6 +855,7 @@ function definirModoFormularioVenda() {
   }
 }
 
+// Limpa o formulário de venda e inicia uma ficha nova com data e identificador próprios.
 function limparFichaVenda() {
   el.formVenda?.reset();
   estado.dataVendaPadrao = dataLocalISO();
@@ -658,6 +870,7 @@ function limparFichaVenda() {
   renderizarItensVenda();
 }
 
+// Informa se há dados de venda ou estoque que precisam ser preservados antes de sair.
 function temRascunhoVenda() {
   const camposPreenchidos = [
     el.vendaCliente,
@@ -672,6 +885,7 @@ function temRascunhoVenda() {
   return Boolean(rascunhoAtivo || estado.rascunhoNovaVenda || estado.rascunhosEdicaoVenda.size > 0);
 }
 
+// Solicita a confirmação nativa do navegador se a página tiver alterações não salvas.
 function protegerRecarregamento(evento) {
   if (obterItensAlterados().length === 0 && !temRascunhoVenda()) return;
 
@@ -680,11 +894,13 @@ function protegerRecarregamento(evento) {
   evento.returnValue = "";
 }
 
+// Gera um identificador local para distinguir uma venda em preparação das demais.
 function gerarIdVendaCliente() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+// Fecha o formulário; no modo de edição guarda o rascunho e retorna à lista protegida.
 function fecharModalVenda() {
   const voltandoParaLista = estado.modoFormularioVenda === "editar";
   if (voltandoParaLista) guardarRascunhoEdicaoVenda();
@@ -703,12 +919,14 @@ function fecharModalVenda() {
   }
 }
 
+// Escolhe uma chave estável para recuperar o rascunho da venda correspondente.
 function obterChaveEdicaoVenda(venda) {
   return venda.idVenda
     ? `id:${venda.idVenda}`
     : venda.chaveEdicao || `linhas:${(venda.linhasVenda || []).join(",")}`;
 }
 
+// Converte os itens da venda carregada em itens editáveis ligados às linhas do estoque.
 function criarRascunhoEdicaoVenda(venda) {
   const itensPorLinha = new Map();
   for (const item of venda.itens || []) {
@@ -738,6 +956,7 @@ function criarRascunhoEdicaoVenda(venda) {
   };
 }
 
+// Salva na memória do navegador os campos e itens da venda que está sendo editada.
 function guardarRascunhoEdicaoVenda() {
   if (estado.modoFormularioVenda !== "editar" || !estado.chaveEdicaoVenda) return;
   estado.rascunhosEdicaoVenda.set(estado.chaveEdicaoVenda, {
@@ -751,6 +970,7 @@ function guardarRascunhoEdicaoVenda() {
   });
 }
 
+// Preserva a venda nova em andamento antes de abrir o fluxo de edição de vendas.
 function guardarRascunhoNovaVenda() {
   if (estado.modoFormularioVenda !== "nova") return;
   const camposPreenchidos = [
@@ -774,6 +994,7 @@ function guardarRascunhoNovaVenda() {
   };
 }
 
+// Restaura no formulário os dados guardados de uma venda nova ainda não registrada.
 function restaurarRascunhoNovaVenda() {
   const rascunho = estado.rascunhoNovaVenda;
   if (!rascunho) return;
@@ -790,6 +1011,7 @@ function restaurarRascunhoNovaVenda() {
   renderizarItensVenda();
 }
 
+// Atualiza o estoque e abre uma venda selecionada, retomando o rascunho se já existir.
 async function abrirEditorVenda(venda) {
   if (obterItensAlterados().length > 0) {
     definirStatus("Salve ou descarte as alterações do estoque antes de editar uma venda.", "erro");
@@ -822,6 +1044,7 @@ async function abrirEditorVenda(venda) {
   abrirModalVenda();
 }
 
+// Reabre a lista de vendas no modo de edição sem exigir nova autenticação nessa sessão.
 function mostrarListaEdicaoVendas() {
   if (!el.modalVendidos || estado.modoVendas !== "editar") return;
   if (el.formVendidos) el.formVendidos.hidden = true;
@@ -832,6 +1055,7 @@ function mostrarListaEdicaoVendas() {
   else el.modalVendidos.setAttribute("open", "");
 }
 
+// Pesquisa produtos do estoque e desabilita inclusão quando a quantidade disponível acabou.
 function renderizarResultadosVenda() {
   if (!el.resultadosProdutosVenda || !el.mensagemResultadosVenda) return;
 
@@ -897,6 +1121,7 @@ function renderizarResultadosVenda() {
   el.resultadosProdutosVenda.appendChild(fragmento);
 }
 
+// Informa quantas unidades deste produto já pertenciam à venda antes da edição.
 function obterQuantidadeOriginalVenda(idProduto) {
   if (estado.modoFormularioVenda !== "editar" || !estado.vendaOriginalEdicao) return 0;
   const produto = estado.itens.find((item) => item.id === idProduto);
@@ -906,11 +1131,13 @@ function obterQuantidadeOriginalVenda(idProduto) {
     .reduce((soma, item) => soma + Math.max(0, Number(item.quantidade) || 0), 0);
 }
 
+// Calcula o máximo permitido: estoque atual mais unidades já reservadas pela venda editada.
 function obterLimiteQuantidadeVenda(item) {
   const estoqueAtual = Math.max(0, Number(item.quantidadeAtual) || 0);
   return estoqueAtual + obterQuantidadeOriginalVenda(item.id);
 }
 
+// Acrescenta uma unidade ao rascunho, respeitando o limite calculado para o produto.
 function adicionarProdutoAVenda(item) {
   const limite = obterLimiteQuantidadeVenda(item);
   if (limite <= 0) return;
@@ -931,6 +1158,7 @@ function adicionarProdutoAVenda(item) {
   guardarRascunhoEdicaoVenda();
 }
 
+// Altera a quantidade de um item do rascunho sem exceder o estoque disponível.
 function alterarQuantidadeItemVenda(id, delta) {
   const item = estado.itensVenda.find((produto) => produto.id === id);
   if (!item) return;
@@ -941,12 +1169,14 @@ function alterarQuantidadeItemVenda(id, delta) {
   guardarRascunhoEdicaoVenda();
 }
 
+// Remove o produto do rascunho; o estoque só será ajustado quando a edição for salva.
 function removerItemDaVenda(id) {
   estado.itensVenda = estado.itensVenda.filter((produto) => produto.id !== id);
   renderizarItensVenda();
   guardarRascunhoEdicaoVenda();
 }
 
+// Desenha os itens da venda e seus controles de quantidade, remoção e contagem total.
 function renderizarItensVenda() {
   if (!el.itensVenda) return;
   el.itensVenda.innerHTML = "";
@@ -1008,6 +1238,7 @@ function renderizarItensVenda() {
   renderizarResultadosVenda();
 }
 
+// Limpa autenticação, filtros e resultados ao encerrar ou reiniciar a consulta de vendas.
 function limparConsultaVendidos() {
   estado.idConsultaVendas += 1;
   el.formVendidos?.reset();
@@ -1031,6 +1262,7 @@ function limparConsultaVendidos() {
   }
 }
 
+// Abre a consulta ou seleção de vendas, exigindo senha antes de exibir os registros.
 function abrirModalVendidos(modo = "consulta") {
   if (!el.modalVendidos) return;
   if (modo === "editar") guardarRascunhoNovaVenda();
@@ -1050,6 +1282,7 @@ function abrirModalVendidos(modo = "consulta") {
   el.senhaVendidos?.focus();
 }
 
+// Fecha a lista e pode preservá-la temporariamente enquanto o formulário de edição abre.
 function fecharModalVendidos(preservarLista = false) {
   estado.preservarConsultaAoFechar = preservarLista;
   if (typeof el.modalVendidos?.close === "function") {
@@ -1061,6 +1294,7 @@ function fecharModalVendidos(preservarLista = false) {
   }
 }
 
+// Valida a senha no servidor e carrega as vendas agrupadas para consulta ou edição.
 async function consultarVendas(evento) {
   evento.preventDefault();
   if (estado.consultandoVendas) return;
@@ -1113,11 +1347,13 @@ async function consultarVendas(evento) {
   }
 }
 
+// Exibe datas ISO do histórico no formato brasileiro dia/mês/ano.
 function formatarDataHistorico(data) {
   const partes = String(data || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return partes ? `${partes[3]}/${partes[2]}/${partes[1]}` : data || "Data não informada";
 }
 
+// Filtra e monta os cartões do histórico; no modo de edição inclui ação por venda.
 function renderizarVendas() {
   el.listaVendidos.innerHTML = "";
   if (estado.vendasCarregadas.length === 0) {
@@ -1198,6 +1434,7 @@ function renderizarVendas() {
   el.listaVendidos.appendChild(fragmento);
 }
 
+// Valida o formulário antes de abrir a confirmação por senha para registrar ou editar.
 function iniciarRegistroVenda(evento) {
   evento.preventDefault();
   if (!el.statusVenda || estado.salvando) return;
@@ -1226,6 +1463,7 @@ function iniciarRegistroVenda(evento) {
 }
 
 // Popup de senha para salvar
+// Configura a confirmação de senha de acordo com a operação solicitada.
 function abrirModalSenha(operacao = "estoque") {
   if (operacao === "estoque" && obterItensAlterados().length === 0) return;
 
@@ -1233,14 +1471,20 @@ function abrirModalSenha(operacao = "estoque") {
   if (el.modalSenhaTitulo) {
     el.modalSenhaTitulo.textContent = operacao === "venda"
       ? "Confirmar venda"
-      : operacao === "editarVenda" ? "Salvar edição da venda" : "Confirmar alterações";
+      : operacao === "editarVenda" ? "Salvar edição da venda"
+        : operacao === "adicionarProduto" ? "Confirmar adição do produto"
+          : operacao === "removerProduto" ? "Confirmar remoção do produto" : "Confirmar alterações";
   }
   if (el.modalSenhaDescricao) {
     el.modalSenhaDescricao.textContent = operacao === "venda"
       ? "Digite a senha do vendedor para registrar a venda e baixar os itens do estoque."
       : operacao === "editarVenda"
         ? "Digite sua senha novamente para salvar os dados da venda e ajustar o estoque."
-        : "Digite sua senha de funcionário para salvar as novas quantidades na planilha.";
+        : operacao === "adicionarProduto"
+          ? "Digite sua senha de funcionário para adicionar o produto à planilha."
+          : operacao === "removerProduto"
+            ? `Digite sua senha de funcionário para remover ${estado.produtoPendente?.nome || "o produto"} e todas as cores dele da planilha.`
+            : "Digite sua senha de funcionário para salvar as novas quantidades na planilha.";
   }
   if (el.labelSenhaFuncionario) {
     el.labelSenhaFuncionario.textContent = operacao === "venda"
@@ -1252,9 +1496,7 @@ function abrirModalSenha(operacao = "estoque") {
   el.erroSenha.textContent = "";
   el.senhaFuncionario.value = "";
   el.btnConfirmarSalvar.disabled = false;
-  el.btnConfirmarSalvar.textContent = operacao === "venda"
-    ? "Confirmar e Registrar Venda"
-    : operacao === "editarVenda" ? "Confirmar e Salvar Edição" : "Confirmar e Salvar";
+  el.btnConfirmarSalvar.textContent = textoBotaoOperacaoSenha(operacao);
 
   if (typeof el.modalSenha.showModal === "function") {
     el.modalSenha.showModal();
@@ -1264,6 +1506,15 @@ function abrirModalSenha(operacao = "estoque") {
   el.senhaFuncionario.focus();
 }
 
+function textoBotaoOperacaoSenha(operacao) {
+  if (operacao === "venda") return "Confirmar e Registrar Venda";
+  if (operacao === "editarVenda") return "Confirmar e Salvar Edição";
+  if (operacao === "adicionarProduto") return "Confirmar e Adicionar";
+  if (operacao === "removerProduto") return "Confirmar e Remover";
+  return "Confirmar e Salvar";
+}
+
+// Fecha a confirmação de senha quando nenhuma gravação estiver em andamento.
 function fecharModalSenha() {
   if (estado.salvando) return;
   if (typeof el.modalSenha.close === "function") {
@@ -1272,9 +1523,13 @@ function fecharModalSenha() {
     el.modalSenha.removeAttribute("open");
   }
   el.senhaFuncionario.value = "";
+  if (estado.operacaoSenha === "adicionarProduto" || estado.operacaoSenha === "removerProduto") {
+    estado.produtoPendente = null;
+  }
   estado.operacaoSenha = null;
 }
 
+// Encaminha a senha e as alterações para a operação correta no Web App.
 async function salvarAlteracoesComSenha(evento) {
   evento.preventDefault();
   if (estado.salvando) return;
@@ -1291,6 +1546,9 @@ async function salvarAlteracoesComSenha(evento) {
   }
   if (estado.operacaoSenha === "editarVenda") {
     return editarVendaComSenha(senha);
+  }
+  if (estado.operacaoSenha === "adicionarProduto" || estado.operacaoSenha === "removerProduto") {
+    return executarOperacaoProdutoComSenha(senha, estado.operacaoSenha);
   }
 
   const alterados = obterItensAlterados().map((item) => ({
@@ -1357,6 +1615,62 @@ async function salvarAlteracoesComSenha(evento) {
   }
 }
 
+// Envia adição ou remoção autenticada ao Apps Script e atualiza o estoque após a confirmação.
+async function executarOperacaoProdutoComSenha(senha, operacao) {
+  if (estado.salvando || !estado.produtoPendente) return;
+  estado.salvando = true;
+  el.erroSenha.hidden = true;
+  el.btnConfirmarSalvar.disabled = true;
+  el.btnConfirmarSalvar.textContent = operacao === "adicionarProduto" ? "Adicionando produto..." : "Removendo produto...";
+
+  try {
+    const resposta = await fetch(WEB_APP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        acao: operacao === "adicionarProduto" ? "adicionarproduto" : "removerproduto",
+        senha,
+        produto: estado.produtoPendente,
+      }),
+    });
+    if (!resposta.ok) throw new Error(`HTTP ${resposta.status}`);
+
+    const resultado = await resposta.json();
+    if (!resultado || resultado.ok !== true) {
+      el.erroSenha.textContent = resultado?.mensagem || "Não foi possível atualizar os produtos.";
+      el.erroSenha.hidden = false;
+      el.btnConfirmarSalvar.disabled = false;
+      el.btnConfirmarSalvar.textContent = textoBotaoOperacaoSenha(operacao);
+      return;
+    }
+
+    estado.salvando = false;
+    fecharModalSenha();
+    if (operacao === "adicionarProduto") {
+      el.formAdicionarProduto.reset();
+      definirStatus("Produto adicionado ao estoque", "ok");
+    } else {
+      estado.produtoSelecionadoRemover = null;
+      renderizarResultadosRemocao();
+      definirStatus("Produto removido do estoque", "ok");
+    }
+
+    const estoqueCarregado = await carregarEstoque();
+    if (!estoqueCarregado) {
+      definirStatus("Operação realizada; não foi possível atualizar a tela do estoque", "erro");
+    }
+  } catch (erro) {
+    console.error("Erro ao atualizar produto:", erro);
+    el.erroSenha.textContent = "Não foi possível confirmar o resultado. Recarregue o estoque antes de tentar novamente.";
+    el.erroSenha.hidden = false;
+    el.btnConfirmarSalvar.disabled = false;
+    el.btnConfirmarSalvar.textContent = textoBotaoOperacaoSenha(operacao);
+  } finally {
+    estado.salvando = false;
+  }
+}
+
+// Registra uma venda nova no servidor, que valida a senha e baixa o estoque.
 async function registrarVendaComSenha(senha) {
   if (estado.salvando) return;
 
@@ -1445,6 +1759,7 @@ async function registrarVendaComSenha(senha) {
   }
 }
 
+// Envia a edição autenticada; ao confirmar, atualiza a lista e recarrega o estoque.
 async function editarVendaComSenha(senha) {
   if (estado.salvando || !estado.vendaOriginalEdicao || !estado.chaveEdicaoVenda) return;
   if (estado.itensVenda.length === 0) {
@@ -1541,7 +1856,7 @@ async function editarVendaComSenha(senha) {
   }
 }
 
-// Eventos gerais
+// Eventos gerais: conecta os controles da página às funções de consulta, edição e gravação.
 el.buscaNome?.addEventListener("input", renderizarTabela);
 el.buscaCor?.addEventListener("input", renderizarTabela);
 
@@ -1555,6 +1870,10 @@ el.btnRecarregarEstoque?.addEventListener("click", recarregarEstoqueManualmente)
 el.btnDescartar?.addEventListener("click", descartarAlteracoes);
 el.btnAbrirSalvar?.addEventListener("click", abrirModalSenha);
 el.btnCancelarModal?.addEventListener("click", fecharModalSenha);
+el.modalSenha?.addEventListener("cancel", (evento) => {
+  evento.preventDefault();
+  fecharModalSenha();
+});
 el.formSalvar?.addEventListener("submit", salvarAlteracoesComSenha);
 el.btnAlternarTema?.addEventListener("click", alternarTema);
 el.btnAbrirVendidos?.addEventListener("click", abrirModalVendidos);
@@ -1572,6 +1891,26 @@ el.modalVendidos?.addEventListener("close", () => {
 el.filtroVendidosCliente?.addEventListener("input", renderizarVendas);
 el.filtroVendidosMovel?.addEventListener("input", renderizarVendas);
 el.filtroVendidosData?.addEventListener("input", renderizarVendas);
+el.btnAbrirAdicionarProduto?.addEventListener("click", abrirModalAdicionarProduto);
+el.btnFecharAdicionarProduto?.addEventListener("click", fecharModalAdicionarProduto);
+el.btnCancelarAdicionarProduto?.addEventListener("click", fecharModalAdicionarProduto);
+el.formAdicionarProduto?.addEventListener("submit", iniciarAdicaoProduto);
+el.modalAdicionarProduto?.addEventListener("cancel", (evento) => {
+  evento.preventDefault();
+  fecharModalAdicionarProduto();
+});
+el.btnAbrirRemoverProduto?.addEventListener("click", abrirModalRemoverProduto);
+el.btnFecharRemoverProduto?.addEventListener("click", fecharModalRemoverProduto);
+el.btnCancelarRemoverProduto?.addEventListener("click", fecharModalRemoverProduto);
+el.btnConfirmarRemoverProduto?.addEventListener("click", iniciarRemocaoProduto);
+el.buscaProdutoRemover?.addEventListener("input", () => {
+  estado.produtoSelecionadoRemover = null;
+  renderizarResultadosRemocao();
+});
+el.modalRemoverProduto?.addEventListener("cancel", (evento) => {
+  evento.preventDefault();
+  fecharModalRemoverProduto();
+});
 el.btnAbrirVenda?.addEventListener("click", abrirNovaVenda);
 el.btnFecharVenda?.addEventListener("click", fecharModalVenda);
 el.btnLimparVenda?.addEventListener("click", limparFichaVenda);
@@ -1595,16 +1934,16 @@ el.buscaProdutoVenda?.addEventListener("input", renderizarResultadosVenda);
 el.formVenda?.addEventListener("submit", iniciarRegistroVenda);
 window.addEventListener("beforeunload", protegerRecarregamento);
 
-// Mantém o rascunho apenas durante a vida da página e descarta após atualização.
+// Inicializa a ficha de venda e as preferências depois que o script encontra o HTML.
 limparFichaVenda();
 inicializarTema();
 window.addEventListener("pageshow", (evento) => {
   if (evento.persisted && estado.modoFormularioVenda !== "editar") limparFichaVenda();
 });
 
-// Garante que a imagem suma se o usuário soltar o dedo/mouse fora do botão
+// Garante que a imagem suma se o usuário soltar o dedo/mouse fora do botão.
 document.addEventListener("pointerup", esconderImagem);
 document.addEventListener("pointercancel", esconderImagem);
 
-// Inicia carregando os dados da planilha ao abrir o site
+// Carrega o estoque inicial assim que o app é iniciado.
 carregarEstoque();

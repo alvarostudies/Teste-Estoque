@@ -7,12 +7,14 @@ const ABA_USUARIOS = "Usuarios";
 const ABA_HISTORICO = "Historico";
 const ABA_VENDAS = "vendas";
 
+// Escolhe a planilha ativa quando o script está vinculado a ela ou abre outra pelo ID.
 function obterPlanilha() {
   return SPREADSHEET_ID
     ? SpreadsheetApp.openById(SPREADSHEET_ID)
     : SpreadsheetApp.getActiveSpreadsheet();
 }
 
+// Padroniza respostas do Apps Script como JSON para o navegador.
 function responderJson(objeto) {
   return ContentService
     .createTextOutput(JSON.stringify(objeto))
@@ -35,7 +37,9 @@ function doGet(e) {
       return responderJson({ ok: true, itens: [] });
     }
 
-    const valores = aba.getRange(2, 1, ultimaLinha - 1, ultimaColuna).getValues();
+    // A imagem permanece na última coluna da aba; A:C guardam nome, cor e quantidade.
+    const colunaImagem = Math.max(4, ultimaColuna);
+    const valores = aba.getRange(2, 1, ultimaLinha - 1, colunaImagem).getValues();
     const itens = [];
 
     for (let i = 0; i < valores.length; i++) {
@@ -48,7 +52,7 @@ function doGet(e) {
       if (!nome && !cor) continue;
 
       const qtd = Math.max(0, parseInt(linha[2], 10) || 0);
-      const imagemBruta = String(linha[ultimaColuna - 1] ?? "").trim();
+      const imagemBruta = String(linha[colunaImagem - 1] ?? "").trim();
       const imagem = /^https?:\/\//i.test(imagemBruta) ? imagemBruta : "";
 
       itens.push({
@@ -67,8 +71,9 @@ function doGet(e) {
   }
 }
 
-// Valida a senha do funcionário e salva as quantidades alteradas
+// Roteia pedidos autenticados: consulta vendas, registra/edita venda ou salva estoque.
 function doPost(e) {
+  // Serializa alterações simultâneas para evitar que duas vendas sobrescrevam o mesmo estoque.
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
 
@@ -86,6 +91,7 @@ function doPost(e) {
       return responderJson({ ok: false, mensagem: "Informe a senha." });
     }
 
+    // A autenticação é exigida para toda operação de escrita ou leitura protegida de vendas.
     const usuario = validarSenhaFuncionario(senhaInformada);
     if (!usuario) {
       return responderJson({ ok: false, mensagem: "Senha incorreta ou funcionário inativo." });
@@ -101,6 +107,12 @@ function doPost(e) {
     if (acao === "editarvenda") {
       return editarVenda(ss, usuario, dados.venda);
     }
+    if (acao === "adicionarproduto") {
+      return adicionarProduto(ss, usuario, dados.produto);
+    }
+    if (acao === "removerproduto") {
+      return removerProduto(ss, usuario, dados.produto);
+    }
     if (acao !== "salvar") {
       return responderJson({ ok: false, mensagem: "Ação não reconhecida." });
     }
@@ -114,6 +126,7 @@ function doPost(e) {
       return responderJson({ ok: false, mensagem: "Aba 'Estoque' não encontrada." });
     }
 
+    // Aplica alterações da tela de estoque e prepara o histórico dos valores anteriores/novos.
     const registrosHistorico = [];
 
     for (const item of alteracoes) {
@@ -156,6 +169,220 @@ function doPost(e) {
   }
 }
 
+// Adiciona as cores enviadas; variantes existentes recebem a nova quantidade na mesma linha.
+function adicionarProduto(ss, usuario, produto) {
+  if (!produto || typeof produto !== "object") {
+    return responderJson({ ok: false, mensagem: "Dados do produto inválidos." });
+  }
+
+  const nome = String(produto.nome ?? "").trim();
+  const imagem = String(produto.imagem ?? "").trim();
+  const quantidade = Number(produto.quantidade);
+  const coresRecebidas = Array.isArray(produto.cores) ? produto.cores : [];
+  const cores = [];
+  const chavesCores = new Set();
+
+  if (!nome || nome.length > 150) {
+    return responderJson({ ok: false, mensagem: "Informe um nome de produto válido (até 150 caracteres)." });
+  }
+  if (!Number.isSafeInteger(quantidade) || quantidade < 0) {
+    return responderJson({ ok: false, mensagem: "A quantidade deve ser um número inteiro igual ou maior que zero." });
+  }
+  if (coresRecebidas.length === 0 || coresRecebidas.length > 50) {
+    return responderJson({ ok: false, mensagem: "Informe de 1 a 50 cores para o produto." });
+  }
+  if (imagem && (imagem.length > 2000 || !/^https?:\/\/\S+$/i.test(imagem))) {
+    return responderJson({ ok: false, mensagem: "O link da foto deve ser um endereço HTTP ou HTTPS válido." });
+  }
+  for (const corBruta of coresRecebidas) {
+    const cor = String(corBruta ?? "").trim();
+    const chaveCor = normalizarChaveVenda(cor);
+    if (!cor || cor.length > 100) {
+      return responderJson({ ok: false, mensagem: "Cada cor precisa ter entre 1 e 100 caracteres." });
+    }
+    if (!chavesCores.has(chaveCor)) {
+      chavesCores.add(chaveCor);
+      cores.push(cor);
+    }
+  }
+  if (cores.length === 0) {
+    return responderJson({ ok: false, mensagem: "Informe ao menos uma cor válida." });
+  }
+
+  const abaEstoque = ss.getSheetByName(ABA_ESTOQUE);
+  if (!abaEstoque) return responderJson({ ok: false, mensagem: "Aba 'Estoque' não encontrada." });
+
+  const ultimaLinha = abaEstoque.getLastRow();
+  const colunaImagem = Math.max(4, abaEstoque.getLastColumn());
+  const dadosEstoque = ultimaLinha >= 2
+    ? abaEstoque.getRange(2, 1, ultimaLinha - 1, colunaImagem).getValues()
+    : [];
+  const linhasPorChave = new Map();
+  for (let indice = 0; indice < dadosEstoque.length; indice++) {
+    const nomeAtual = String(dadosEstoque[indice][0] ?? "").trim();
+    const corAtual = String(dadosEstoque[indice][1] ?? "").trim();
+    if (!nomeAtual) continue;
+    const chave = chaveProdutoVenda(nomeAtual, corAtual);
+    if (!linhasPorChave.has(chave)) linhasPorChave.set(chave, []);
+    linhasPorChave.get(chave).push({ linha: indice + 2, valores: dadosEstoque[indice] });
+  }
+
+  const atualizacoes = [];
+  const novasLinhas = [];
+  for (const cor of cores) {
+    const chave = chaveProdutoVenda(nome, cor);
+    const existentes = linhasPorChave.get(chave) || [];
+    if (existentes.length > 1) {
+      return responderJson({
+        ok: false,
+        mensagem: `Há mais de uma linha para ${nome} (${cor}). Corrija as duplicatas antes de adicionar o produto.`,
+      });
+    }
+    if (existentes.length === 1) {
+      const existente = existentes[0];
+      const quantidadeAnterior = Math.max(0, parseInt(existente.valores[2], 10) || 0);
+      const quantidadeNova = quantidadeAnterior + quantidade;
+      if (!Number.isSafeInteger(quantidadeNova)) {
+        return responderJson({ ok: false, mensagem: `A quantidade final de ${nome} (${cor}) excede o limite permitido.` });
+      }
+      atualizacoes.push({
+        linha: existente.linha,
+        valoresOriginais: existente.valores,
+        quantidadeNova,
+        imagemNova: imagem || "",
+      });
+    } else {
+      const novaLinha = new Array(colunaImagem).fill("");
+      novaLinha[0] = textoSeguroPlanilha(nome);
+      novaLinha[1] = textoSeguroPlanilha(cor);
+      novaLinha[2] = quantidade;
+      novaLinha[colunaImagem - 1] = imagem ? textoSeguroPlanilha(imagem) : "";
+      novasLinhas.push(novaLinha);
+    }
+  }
+
+  const linhaHistoricaMaxima = obterMaiorLinhaEstoqueHistorica(ss);
+  const primeiraLinhaNova = Math.max(abaEstoque.getLastRow(), linhaHistoricaMaxima) + 1;
+  if (novasLinhas.length > 0) {
+    const ultimaLinhaNova = primeiraLinhaNova + novasLinhas.length - 1;
+    const linhasFaltantes = ultimaLinhaNova - abaEstoque.getMaxRows();
+    if (linhasFaltantes > 0) abaEstoque.insertRowsAfter(abaEstoque.getMaxRows(), linhasFaltantes);
+  }
+
+  const atualizacoesGravadas = [];
+  let linhasNovasGravadas = false;
+  try {
+    for (const atualizacao of atualizacoes) {
+      atualizacoesGravadas.push(atualizacao);
+      abaEstoque.getRange(atualizacao.linha, 3).setValue(atualizacao.quantidadeNova);
+      if (atualizacao.imagemNova) abaEstoque.getRange(atualizacao.linha, colunaImagem).setValue(textoSeguroPlanilha(atualizacao.imagemNova));
+    }
+    if (novasLinhas.length > 0) {
+      linhasNovasGravadas = true;
+      abaEstoque.getRange(primeiraLinhaNova, 1, novasLinhas.length, 4).setValues(novasLinhas);
+    }
+  } catch (erro) {
+    const falhasRollback = [];
+    if (linhasNovasGravadas) {
+      try {
+        abaEstoque.getRange(primeiraLinhaNova, 1, novasLinhas.length, colunaImagem).clearContent();
+      } catch (erroRollback) {
+        falhasRollback.push(erroRollback.message);
+      }
+    }
+    for (let indice = atualizacoesGravadas.length - 1; indice >= 0; indice--) {
+      const atualizacao = atualizacoesGravadas[indice];
+      try {
+        abaEstoque.getRange(atualizacao.linha, 1, 1, colunaImagem).setValues([atualizacao.valoresOriginais]);
+      } catch (erroRollback) {
+        falhasRollback.push(erroRollback.message);
+      }
+    }
+    const detalheRollback = falhasRollback.length
+      ? " Falha ao reverter parcialmente a operação: " + falhasRollback.join("; ")
+      : " A operação foi revertida.";
+    throw new Error("Não foi possível adicionar o produto." + detalheRollback + " " + erro.message);
+  }
+
+  return responderJson({
+    ok: true,
+    mensagem: "Produto adicionado ao estoque.",
+    funcionario: usuario.nome,
+    variantesAdicionadas: novasLinhas.length,
+    variantesAtualizadas: atualizacoes.length,
+  });
+}
+
+// Remove todas as cores de um produto sem apagar linhas, evitando deslocar referências de vendas.
+function removerProduto(ss, usuario, produto) {
+  const nome = String(produto?.nome ?? "").trim();
+  if (!nome || nome.length > 150) {
+    return responderJson({ ok: false, mensagem: "Selecione um produto válido para remover." });
+  }
+
+  const abaEstoque = ss.getSheetByName(ABA_ESTOQUE);
+  if (!abaEstoque) return responderJson({ ok: false, mensagem: "Aba 'Estoque' não encontrada." });
+  const ultimaLinha = abaEstoque.getLastRow();
+  const colunaImagem = Math.max(4, abaEstoque.getLastColumn());
+  if (ultimaLinha < 2) return responderJson({ ok: false, mensagem: "O estoque está vazio." });
+
+  const dados = abaEstoque.getRange(2, 1, ultimaLinha - 1, colunaImagem).getValues();
+  const chaveProcurada = normalizarChaveVenda(nome);
+  const linhasEncontradas = [];
+  for (let indice = 0; indice < dados.length; indice++) {
+    const nomeAtual = String(dados[indice][0] ?? "").trim();
+    if (nomeAtual && normalizarChaveVenda(nomeAtual) === chaveProcurada) {
+      linhasEncontradas.push({ linha: indice + 2, valores: dados[indice] });
+    }
+  }
+  if (linhasEncontradas.length === 0) {
+    return responderJson({ ok: false, mensagem: "O produto não foi encontrado no estoque. Atualize a lista e tente novamente." });
+  }
+
+  const linhasRemovidas = [];
+  try {
+    for (const item of linhasEncontradas) {
+      linhasRemovidas.push(item);
+      abaEstoque.getRange(item.linha, 1, 1, colunaImagem).clearContent();
+    }
+  } catch (erro) {
+    const falhasRollback = [];
+    for (let indice = linhasRemovidas.length - 1; indice >= 0; indice--) {
+      const item = linhasRemovidas[indice];
+      try {
+        abaEstoque.getRange(item.linha, 1, 1, colunaImagem).setValues([item.valores]);
+      } catch (erroRollback) {
+        falhasRollback.push(erroRollback.message);
+      }
+    }
+    const detalheRollback = falhasRollback.length
+      ? " Falha ao restaurar parcialmente os dados: " + falhasRollback.join("; ")
+      : " Os dados foram restaurados.";
+    throw new Error("Não foi possível remover o produto." + detalheRollback + " " + erro.message);
+  }
+
+  return responderJson({
+    ok: true,
+    mensagem: "Produto removido do estoque.",
+    funcionario: usuario.nome,
+    variantesRemovidas: linhasEncontradas.length,
+  });
+}
+
+// Mantém as linhas citadas em vendas antigas reservadas para que novos produtos não reutilizem seus números.
+function obterMaiorLinhaEstoqueHistorica(ss) {
+  const abaVendas = ss.getSheetByName(ABA_VENDAS);
+  if (!abaVendas || abaVendas.getLastRow() < 2 || abaVendas.getLastColumn() < 12) return 1;
+  const valores = abaVendas.getRange(2, 12, abaVendas.getLastRow() - 1, 1).getValues();
+  let maiorLinha = 1;
+  for (const [valor] of valores) {
+    const linha = Number(valor);
+    if (Number.isInteger(linha) && linha >= 2) maiorLinha = Math.max(maiorLinha, linha);
+  }
+  return maiorLinha;
+}
+
+// Lê as linhas de vendas, agrupa os itens da mesma compra e fornece referências ao estoque.
 function listarVendas(ss) {
   const abaVendas = ss.getSheetByName(ABA_VENDAS);
   if (!abaVendas || abaVendas.getLastRow() < 2) {
@@ -166,6 +393,7 @@ function listarVendas(ss) {
   const linhas = abaVendas
     .getRange(2, 1, abaVendas.getLastRow() - 1, quantidadeColunas)
     .getValues();
+  // O índice liga vendas antigas e novas às respectivas linhas de estoque.
   const estoquePorChave = obterIndiceEstoque(ss);
   const vendasPorChave = new Map();
 
@@ -234,6 +462,7 @@ function listarVendas(ss) {
   return responderJson({ ok: true, vendas });
 }
 
+// Normaliza texto para formar chaves consistentes mesmo com acentos e espaços diferentes.
 function normalizarChaveVenda(valor) {
   return String(valor ?? "")
     .normalize("NFD")
@@ -243,6 +472,7 @@ function normalizarChaveVenda(valor) {
     .toLocaleLowerCase("pt-BR");
 }
 
+// Cria a chave usada para agrupar e localizar as linhas pertencentes a uma venda.
 function chaveAgrupamentoVenda(linha) {
   const idVenda = String(linha[0] ?? "").trim();
   const dataValor = linha[1];
@@ -262,10 +492,12 @@ function chaveAgrupamentoVenda(linha) {
     : `legado:${[data, pessoa, telefone, endereco, vendedor].map(normalizarChaveVenda).join("|")}`;
 }
 
+// Identifica um produto pela combinação normalizada de nome e cor.
 function chaveProdutoVenda(nome, cor) {
   return `${normalizarChaveVenda(nome)}|${normalizarChaveVenda(cor)}`;
 }
 
+// Indexa produtos do estoque para localizar linhas únicas e reconhecer duplicidades.
 function obterIndiceEstoque(ss) {
   const abaEstoque = ss.getSheetByName(ABA_ESTOQUE);
   if (!abaEstoque || abaEstoque.getLastRow() < 2) return new Map();
@@ -282,6 +514,7 @@ function obterIndiceEstoque(ss) {
   return indice;
 }
 
+// Confere campos obrigatórios, data e limite de itens antes de gravar uma venda.
 function validarDadosBasicosVenda(venda, permiteSemItens) {
   const cliente = String(venda?.cliente ?? "").trim();
   const data = String(venda?.data ?? "").trim();
@@ -311,6 +544,7 @@ function validarDadosBasicosVenda(venda, permiteSemItens) {
   return { ok: true, itens };
 }
 
+// Atualiza os dados e itens de uma venda, ajusta o estoque pela diferença e reverte falhas.
 function editarVenda(ss, usuario, venda) {
   if (!venda || typeof venda !== "object") {
     return responderJson({ ok: false, mensagem: "Dados da venda inválidos." });
@@ -328,6 +562,7 @@ function editarVenda(ss, usuario, venda) {
     return responderJson({ ok: false, mensagem: "A venda não foi encontrada. Atualize a lista e tente novamente." });
   }
 
+  // Localiza a venda pela identidade recebida e confere que o conjunto de linhas não mudou.
   const todasLinhas = abaVendas.getRange(2, 1, ultimaLinhaVendas - 1, 12).getValues();
   const chaveEdicao = String(venda.chaveEdicao ?? "");
   const linhasVenda = [];
@@ -354,6 +589,7 @@ function editarVenda(ss, usuario, venda) {
   if (ultimaLinhaEstoque < 2) {
     return responderJson({ ok: false, mensagem: "Não há produtos cadastrados no estoque." });
   }
+  // Reconstrói os itens originais pela linha de estoque para calcular devoluções e novas baixas.
   const dadosEstoque = abaEstoque.getRange(2, 1, ultimaLinhaEstoque - 1, 3).getValues();
   const indiceEstoque = obterIndiceEstoque(ss);
   const itensOriginais = new Map();
@@ -409,6 +645,7 @@ function editarVenda(ss, usuario, venda) {
     else itensNovos.set(linha, { linha, nome, cor, quantidade });
   }
 
+  // Calcula o estoque final como: estoque atual + unidades da venda antiga - unidades novas.
   const linhasAfetadas = new Map();
   for (const [linha, item] of itensOriginais) linhasAfetadas.set(linha, item);
   for (const [linha, item] of itensNovos) {
@@ -454,6 +691,7 @@ function editarVenda(ss, usuario, venda) {
     item.linha,
   ]);
 
+  // Guarda os dados atuais para tentar reverter a operação caso alguma gravação falhe.
   const linhasOriginais = linhasVenda.map((linha, indice) => ({
     linha,
     valores: dadosLinhasVenda[indice],
@@ -538,6 +776,7 @@ function editarVenda(ss, usuario, venda) {
   });
 }
 
+// Valida e grava uma venda nova, deduzindo as quantidades correspondentes do estoque.
 function registrarVenda(ss, usuario, venda) {
   if (!venda || typeof venda !== "object") {
     return responderJson({ ok: false, mensagem: "Dados da venda inválidos." });
@@ -602,6 +841,7 @@ function registrarVenda(ss, usuario, venda) {
     return responderJson({ ok: false, mensagem: "Não há produtos cadastrados no estoque." });
   }
 
+  // Agrega quantidades por linha para validar o saldo e não baixar o mesmo produto duas vezes.
   const dadosEstoque = abaEstoque.getRange(2, 1, ultimaLinhaEstoque - 1, 3).getValues();
   const itensPorLinha = new Map();
 
@@ -703,6 +943,7 @@ function registrarVenda(ss, usuario, venda) {
     item.linha,
   ]);
   const primeiraLinhaVenda = abaVendas.getLastRow() + 1;
+  // Salva primeiro o estoque e depois as linhas da venda; em caso de falha, desfaz o que gravou.
   const estoqueAtualizado = [];
   let gravacaoVendaIniciada = false;
 
@@ -754,6 +995,7 @@ function registrarVenda(ss, usuario, venda) {
   });
 }
 
+// Impede que texto iniciado por caracteres de fórmula seja interpretado como fórmula.
 function textoSeguroPlanilha(valor) {
   const texto = String(valor ?? "");
   return /^[\s]*[=+\-@]/.test(texto) ? "'" + texto : texto;
@@ -764,6 +1006,7 @@ function textoSeguroPlanilha(valor) {
 // Elas ficam na aba "Usuarios" da planilha (Coluna A: Nome | Coluna B: Senha | Coluna C: Ativo).
 // Para alterar a senha de alguém, basta editar diretamente a célula na aba "Usuarios".
 // =====================================================================
+// Confere a senha na aba Usuarios e rejeita contas marcadas como inativas.
 function validarSenhaFuncionario(senhaInformada) {
   const ss = obterPlanilha();
   const abaUsuarios = ss.getSheetByName(ABA_USUARIOS);
@@ -789,6 +1032,7 @@ function validarSenhaFuncionario(senhaInformada) {
   return null;
 }
 
+// Garante que a aba Historico exista e acrescenta nela as alterações de estoque.
 function registrarHistorico(ss, linhas) {
   let abaHist = ss.getSheetByName(ABA_HISTORICO);
   if (!abaHist) {
