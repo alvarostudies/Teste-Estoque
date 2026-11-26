@@ -98,6 +98,9 @@ function doPost(e) {
     if (acao === "vender") {
       return registrarVenda(ss, usuario, dados.venda);
     }
+    if (acao === "editarvenda") {
+      return editarVenda(ss, usuario, dados.venda);
+    }
     if (acao !== "salvar") {
       return responderJson({ ok: false, mensagem: "Ação não reconhecida." });
     }
@@ -159,13 +162,15 @@ function listarVendas(ss) {
     return responderJson({ ok: true, vendas: [] });
   }
 
-  const quantidadeColunas = Math.max(11, abaVendas.getLastColumn());
+  const quantidadeColunas = Math.max(12, abaVendas.getLastColumn());
   const linhas = abaVendas
     .getRange(2, 1, abaVendas.getLastRow() - 1, quantidadeColunas)
     .getValues();
+  const estoquePorChave = obterIndiceEstoque(ss);
   const vendasPorChave = new Map();
 
-  for (const linha of linhas) {
+  for (let indice = 0; indice < linhas.length; indice++) {
+    const linha = linhas[indice];
     const idVenda = String(linha[0] ?? "").trim();
     const dataValor = linha[1];
     const data = dataValor instanceof Date
@@ -183,13 +188,16 @@ function listarVendas(ss) {
 
     if (!produto && !cliente) continue;
 
-    const telefoneNormalizado = String(telefone).replace(/\D/g, "");
-    const pessoa = telefoneNormalizado
-      ? `telefone:${telefoneNormalizado}`
-      : `cliente:${normalizarChaveVenda(cliente || endereco)}`;
-    const chave = idVenda
-      ? `id:${idVenda}|pessoa:${pessoa}`
-      : `legado:${[data, pessoa, telefone, endereco, vendedor].map(normalizarChaveVenda).join("|")}`;
+    const chave = chaveAgrupamentoVenda(linha);
+    const linhaVenda = indice + 2;
+    const linhaEstoqueGravada = Number(linha[11]);
+    const chaveEstoque = chaveProdutoVenda(produto, cor);
+    const correspondencias = estoquePorChave.get(chaveEstoque) || [];
+    const linhaEstoqueGravadaValida = Number.isInteger(linhaEstoqueGravada) &&
+      correspondencias.some((item) => item.linha === linhaEstoqueGravada);
+    const linhaEstoque = linhaEstoqueGravadaValida
+      ? linhaEstoqueGravada
+      : correspondencias.length === 1 ? correspondencias[0].linha : null;
 
     if (!vendasPorChave.has(chave)) {
       vendasPorChave.set(chave, {
@@ -202,15 +210,28 @@ function listarVendas(ss) {
         vendedor,
         registradoPor,
         itens: [],
+        linhasVenda: [],
+        chaveEdicao: chave,
       });
     }
 
+    vendasPorChave.get(chave).linhasVenda.push(linhaVenda);
     if (produto) {
-      vendasPorChave.get(chave).itens.push({ produto, cor, quantidade });
+      vendasPorChave.get(chave).itens.push({
+        produto,
+        cor,
+        quantidade,
+        linhaVenda,
+        linhaEstoque: Number.isInteger(linhaEstoque) ? linhaEstoque : null,
+      });
     }
   }
 
-  return responderJson({ ok: true, vendas: Array.from(vendasPorChave.values()).reverse() });
+  const vendas = Array.from(vendasPorChave.values()).reverse();
+  for (const venda of vendas) {
+    venda.editavel = venda.itens.every((item) => Number.isInteger(item.linhaEstoque));
+  }
+  return responderJson({ ok: true, vendas });
 }
 
 function normalizarChaveVenda(valor) {
@@ -220,6 +241,301 @@ function normalizarChaveVenda(valor) {
     .trim()
     .replace(/\s+/g, " ")
     .toLocaleLowerCase("pt-BR");
+}
+
+function chaveAgrupamentoVenda(linha) {
+  const idVenda = String(linha[0] ?? "").trim();
+  const dataValor = linha[1];
+  const data = dataValor instanceof Date
+    ? Utilities.formatDate(dataValor, Session.getScriptTimeZone(), "yyyy-MM-dd")
+    : String(dataValor ?? "").trim();
+  const cliente = String(linha[2] ?? "").trim();
+  const endereco = String(linha[3] ?? "").trim();
+  const telefone = String(linha[4] ?? "").trim();
+  const vendedor = String(linha[6] ?? "").trim();
+  const telefoneNormalizado = telefone.replace(/\D/g, "");
+  const pessoa = telefoneNormalizado
+    ? `telefone:${telefoneNormalizado}`
+    : `cliente:${normalizarChaveVenda(cliente || endereco)}`;
+  return idVenda
+    ? `id:${idVenda}|pessoa:${pessoa}`
+    : `legado:${[data, pessoa, telefone, endereco, vendedor].map(normalizarChaveVenda).join("|")}`;
+}
+
+function chaveProdutoVenda(nome, cor) {
+  return `${normalizarChaveVenda(nome)}|${normalizarChaveVenda(cor)}`;
+}
+
+function obterIndiceEstoque(ss) {
+  const abaEstoque = ss.getSheetByName(ABA_ESTOQUE);
+  if (!abaEstoque || abaEstoque.getLastRow() < 2) return new Map();
+  const dados = abaEstoque.getRange(2, 1, abaEstoque.getLastRow() - 1, 3).getValues();
+  const indice = new Map();
+  for (let i = 0; i < dados.length; i++) {
+    const nome = String(dados[i][0] ?? "").trim();
+    const cor = String(dados[i][1] ?? "").trim();
+    if (!nome) continue;
+    const chave = chaveProdutoVenda(nome, cor);
+    if (!indice.has(chave)) indice.set(chave, []);
+    indice.get(chave).push({ linha: i + 2, nome, cor });
+  }
+  return indice;
+}
+
+function validarDadosBasicosVenda(venda, permiteSemItens) {
+  const cliente = String(venda?.cliente ?? "").trim();
+  const data = String(venda?.data ?? "").trim();
+  const vendedor = String(venda?.vendedor ?? "").trim();
+  const itens = Array.isArray(venda?.itens) ? venda.itens : [];
+  if (!cliente || !data || !vendedor) {
+    return { ok: false, mensagem: "Informe o nome do cliente, a data e o vendedor." };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+    return { ok: false, mensagem: "A data da venda é inválida." };
+  }
+  const partesData = data.split("-").map(Number);
+  const dataChecada = new Date(Date.UTC(partesData[0], partesData[1] - 1, partesData[2]));
+  if (
+    dataChecada.getUTCFullYear() !== partesData[0] ||
+    dataChecada.getUTCMonth() !== partesData[1] - 1 ||
+    dataChecada.getUTCDate() !== partesData[2]
+  ) {
+    return { ok: false, mensagem: "A data da venda é inválida." };
+  }
+  if (!permiteSemItens && itens.length === 0) {
+    return { ok: false, mensagem: "Adicione pelo menos um produto à venda." };
+  }
+  if (itens.length > 100) {
+    return { ok: false, mensagem: "A venda excede o limite de 100 itens." };
+  }
+  return { ok: true, itens };
+}
+
+function editarVenda(ss, usuario, venda) {
+  if (!venda || typeof venda !== "object") {
+    return responderJson({ ok: false, mensagem: "Dados da venda inválidos." });
+  }
+  const validacao = validarDadosBasicosVenda(venda, true);
+  if (!validacao.ok) return responderJson(validacao);
+
+  const abaVendas = ss.getSheetByName(ABA_VENDAS);
+  const abaEstoque = ss.getSheetByName(ABA_ESTOQUE);
+  if (!abaVendas || !abaEstoque) {
+    return responderJson({ ok: false, mensagem: "A aba de vendas ou de estoque não foi encontrada." });
+  }
+  const ultimaLinhaVendas = abaVendas.getLastRow();
+  if (ultimaLinhaVendas < 2) {
+    return responderJson({ ok: false, mensagem: "A venda não foi encontrada. Atualize a lista e tente novamente." });
+  }
+
+  const todasLinhas = abaVendas.getRange(2, 1, ultimaLinhaVendas - 1, 12).getValues();
+  const chaveEdicao = String(venda.chaveEdicao ?? "");
+  const linhasVenda = [];
+  const dadosLinhasVenda = [];
+  for (let i = 0; i < todasLinhas.length; i++) {
+    if (chaveAgrupamentoVenda(todasLinhas[i]) === chaveEdicao) {
+      linhasVenda.push(i + 2);
+      dadosLinhasVenda.push(todasLinhas[i]);
+    }
+  }
+  const linhasRecebidas = Array.isArray(venda.linhasVenda)
+    ? venda.linhasVenda.map(Number).filter((linha) => Number.isInteger(linha))
+    : [];
+  if (
+    !chaveEdicao ||
+    linhasVenda.length === 0 ||
+    linhasVenda.length !== linhasRecebidas.length ||
+    linhasVenda.some((linha, i) => linha !== linhasRecebidas.sort((a, b) => a - b)[i])
+  ) {
+    return responderJson({ ok: false, mensagem: "Esta venda foi alterada desde a consulta. Atualize a lista e tente novamente." });
+  }
+
+  const ultimaLinhaEstoque = abaEstoque.getLastRow();
+  if (ultimaLinhaEstoque < 2) {
+    return responderJson({ ok: false, mensagem: "Não há produtos cadastrados no estoque." });
+  }
+  const dadosEstoque = abaEstoque.getRange(2, 1, ultimaLinhaEstoque - 1, 3).getValues();
+  const indiceEstoque = obterIndiceEstoque(ss);
+  const itensOriginais = new Map();
+  for (const linhaVenda of dadosLinhasVenda) {
+    const nome = String(linhaVenda[7] ?? "").trim();
+    const cor = String(linhaVenda[8] ?? "").trim();
+    const quantidade = Math.max(0, parseInt(linhaVenda[9], 10) || 0);
+    if (!nome || quantidade <= 0) continue;
+    const linhaGravada = Number(linhaVenda[11]);
+    let linhaEstoque = Number.isInteger(linhaGravada) && linhaGravada >= 2
+      ? linhaGravada
+      : null;
+    if (!linhaEstoque) {
+      const correspondencias = indiceEstoque.get(chaveProdutoVenda(nome, cor)) || [];
+      if (correspondencias.length === 1) linhaEstoque = correspondencias[0].linha;
+    }
+    if (!linhaEstoque || linhaEstoque > ultimaLinhaEstoque) {
+      return responderJson({
+        ok: false,
+        mensagem: `Não foi possível localizar ${nome}${cor ? ` (${cor})` : ""} no estoque. A venda não foi alterada.`,
+      });
+    }
+    const produtoAtual = dadosEstoque[linhaEstoque - 2];
+    if (
+      normalizarChaveVenda(produtoAtual[0]) !== normalizarChaveVenda(nome) ||
+      normalizarChaveVenda(produtoAtual[1]) !== normalizarChaveVenda(cor)
+    ) {
+      return responderJson({ ok: false, mensagem: "Um produto desta venda mudou no estoque. Atualize a lista e tente novamente." });
+    }
+    const existente = itensOriginais.get(linhaEstoque);
+    if (existente) existente.quantidade += quantidade;
+    else itensOriginais.set(linhaEstoque, { linha: linhaEstoque, nome, cor, quantidade });
+  }
+
+  const itensNovos = new Map();
+  for (const recebido of validacao.itens) {
+    const linha = Number(recebido?.linha);
+    const quantidade = Number(recebido?.quantidade);
+    if (
+      !Number.isInteger(linha) || linha < 2 || linha > ultimaLinhaEstoque ||
+      !Number.isInteger(quantidade) || quantidade <= 0
+    ) {
+      return responderJson({ ok: false, mensagem: "Um produto ou quantidade da venda é inválido." });
+    }
+    const dadosProduto = dadosEstoque[linha - 2];
+    const nome = String(dadosProduto[0] ?? "").trim();
+    const cor = String(dadosProduto[1] ?? "").trim();
+    if (!nome || nome !== String(recebido.nome ?? "").trim() || cor !== String(recebido.cor ?? "").trim()) {
+      return responderJson({ ok: false, mensagem: "Um produto mudou no estoque. Atualize a tela e tente novamente." });
+    }
+    const existente = itensNovos.get(linha);
+    if (existente) existente.quantidade += quantidade;
+    else itensNovos.set(linha, { linha, nome, cor, quantidade });
+  }
+
+  const linhasAfetadas = new Map();
+  for (const [linha, item] of itensOriginais) linhasAfetadas.set(linha, item);
+  for (const [linha, item] of itensNovos) {
+    if (!linhasAfetadas.has(linha)) linhasAfetadas.set(linha, item);
+  }
+  for (const item of linhasAfetadas.values()) {
+    const estoqueAtual = Math.max(0, parseInt(dadosEstoque[item.linha - 2][2], 10) || 0);
+    const quantidadeOriginal = itensOriginais.get(item.linha)?.quantidade || 0;
+    const quantidadeNova = itensNovos.get(item.linha)?.quantidade || 0;
+    const maximoVenda = estoqueAtual + quantidadeOriginal;
+    if (quantidadeNova > maximoVenda) {
+      return responderJson({
+        ok: false,
+        mensagem: `Estoque insuficiente para ${item.nome}${item.cor ? ` (${item.cor})` : ""}. Disponível para esta edição: ${maximoVenda}.`,
+      });
+    }
+    item.estoqueAnterior = estoqueAtual;
+    item.estoqueNovo = estoqueAtual + quantidadeOriginal - quantidadeNova;
+  }
+
+  if (!String(abaVendas.getRange(1, 12).getValue() ?? "").trim()) {
+    abaVendas.getRange(1, 12).setValue("Linha Estoque");
+  }
+  const cliente = String(venda.cliente ?? "").trim();
+  const data = String(venda.data ?? "").trim();
+  const endereco = String(venda.endereco ?? "").trim();
+  const telefone = String(venda.telefone ?? "").trim();
+  const observacao = String(venda.observacao ?? "").trim();
+  const vendedor = String(venda.vendedor ?? "").trim();
+  const idVenda = String(dadosLinhasVenda[0][0] ?? "").trim() || Utilities.getUuid();
+  const novasLinhas = Array.from(itensNovos.values()).map((item) => [
+    textoSeguroPlanilha(idVenda),
+    textoSeguroPlanilha(data),
+    textoSeguroPlanilha(cliente),
+    textoSeguroPlanilha(endereco),
+    textoSeguroPlanilha(telefone),
+    textoSeguroPlanilha(observacao),
+    textoSeguroPlanilha(vendedor),
+    textoSeguroPlanilha(item.nome),
+    textoSeguroPlanilha(item.cor),
+    item.quantidade,
+    textoSeguroPlanilha(usuario.nome),
+    item.linha,
+  ]);
+
+  const linhasOriginais = linhasVenda.map((linha, indice) => ({
+    linha,
+    valores: dadosLinhasVenda[indice],
+  }));
+  const linhasMantidas = Math.min(linhasVenda.length, novasLinhas.length);
+  const linhaAnexada = novasLinhas.length > linhasVenda.length ? ultimaLinhaVendas + 1 : null;
+  const estoquesAtualizados = [];
+  let gravacaoVendaIniciada = false;
+  try {
+    for (const item of linhasAfetadas.values()) {
+      if (item.estoqueNovo === item.estoqueAnterior) continue;
+      abaEstoque.getRange(item.linha, 3).setValue(item.estoqueNovo);
+      estoquesAtualizados.push(item);
+    }
+    gravacaoVendaIniciada = true;
+    for (let i = 0; i < linhasMantidas; i++) {
+      abaVendas.getRange(linhasVenda[i], 1, 1, 12).setValues([novasLinhas[i]]);
+    }
+    for (let i = linhasMantidas; i < linhasVenda.length; i++) {
+      abaVendas.getRange(linhasVenda[i], 1, 1, 12).clearContent();
+    }
+    if (linhaAnexada) {
+      abaVendas.getRange(linhaAnexada, 1, novasLinhas.length - linhasVenda.length, 12)
+        .setValues(novasLinhas.slice(linhasVenda.length));
+    }
+  } catch (erro) {
+    const falhasRollback = [];
+    if (gravacaoVendaIniciada) {
+      try {
+        for (const original of linhasOriginais) {
+          abaVendas.getRange(original.linha, 1, 1, 12).setValues([original.valores]);
+        }
+        if (linhaAnexada) {
+          abaVendas.getRange(linhaAnexada, 1, novasLinhas.length - linhasVenda.length, 12).clearContent();
+        }
+      } catch (erroRollbackVendas) {
+        falhasRollback.push(erroRollbackVendas.message);
+      }
+    }
+    for (let i = estoquesAtualizados.length - 1; i >= 0; i--) {
+      const item = estoquesAtualizados[i];
+      try {
+        abaEstoque.getRange(item.linha, 3).setValue(item.estoqueAnterior);
+      } catch (erroRollbackEstoque) {
+        falhasRollback.push(erroRollbackEstoque.message);
+      }
+    }
+    const sufixo = falhasRollback.length
+      ? " Falha ao reverter parcialmente a operação: " + falhasRollback.join("; ")
+      : " A operação foi revertida.";
+    throw new Error("Não foi possível salvar a edição." + sufixo + " " + erro.message);
+  }
+
+  const vendaAtualizada = {
+    idVenda,
+    chaveEdicao: chaveEdicao,
+    data,
+    cliente,
+    endereco,
+    telefone,
+    observacao,
+    vendedor,
+    registradoPor: usuario.nome,
+    editavel: true,
+    linhasVenda: linhasVenda.slice(0, linhasMantidas).concat(
+      linhaAnexada ? novasLinhas.slice(linhasVenda.length).map((_, i) => linhaAnexada + i) : []
+    ),
+    itens: Array.from(itensNovos.values()).map((item) => ({
+      produto: item.nome,
+      cor: item.cor,
+      quantidade: item.quantidade,
+      linhaEstoque: item.linha,
+    })),
+  };
+  vendaAtualizada.chaveEdicao = chaveAgrupamentoVenda([
+    idVenda, data, cliente, endereco, telefone, observacao, vendedor,
+  ]);
+  return responderJson({
+    ok: true,
+    mensagem: "Venda atualizada e estoque ajustado.",
+    venda: vendaAtualizada,
+  });
 }
 
 function registrarVenda(ss, usuario, venda) {
@@ -361,9 +677,13 @@ function registrarVenda(ss, usuario, venda) {
     "Cor",
     "Quantidade",
     "Registrado por",
+    "Linha Estoque",
   ];
   if (abaVendas.getLastRow() === 0) {
     abaVendas.getRange(1, 1, 1, cabecalhos.length).setValues([cabecalhos]);
+  }
+  if (!String(abaVendas.getRange(1, 12).getValue() ?? "").trim()) {
+    abaVendas.getRange(1, 12).setValue("Linha Estoque");
   }
 
   const idVenda = idVendaInformado || Utilities.getUuid();
@@ -380,6 +700,7 @@ function registrarVenda(ss, usuario, venda) {
     textoSeguroPlanilha(item.cor),
     item.quantidade,
     textoSeguroPlanilha(usuario.nome),
+    item.linha,
   ]);
   const primeiraLinhaVenda = abaVendas.getLastRow() + 1;
   const estoqueAtualizado = [];

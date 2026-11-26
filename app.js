@@ -6,6 +6,13 @@ const estado = {
   itensVenda: [], // Itens da venda em preparação no popup.
   idVendaAtual: null,
   dataVendaPadrao: null,
+  rascunhoNovaVenda: null,
+  modoFormularioVenda: "nova",
+  chaveEdicaoVenda: null,
+  vendaOriginalEdicao: null,
+  rascunhosEdicaoVenda: new Map(),
+  modoVendas: "consulta",
+  preservarConsultaAoFechar: false,
   operacaoSenha: null,
   avisoErroCarregamentoMostrado: false,
   carregando: false,
@@ -24,6 +31,7 @@ const el = {
   btnRecarregarEstoque: document.getElementById("btn-recarregar-estoque"),
   btnAlternarTema: document.getElementById("btn-alternar-tema"),
   btnAbrirVendidos: document.getElementById("btn-abrir-vendidos"),
+  btnAbrirEdicaoVenda: document.getElementById("btn-abrir-editar-venda"),
   btnAbrirVenda: document.getElementById("btn-abrir-venda"),
   corpoEstoque: document.getElementById("corpo-estoque"),
   mensagemVazia: document.getElementById("mensagem-vazia"),
@@ -49,6 +57,7 @@ const el = {
 
   modalVenda: document.getElementById("modal-venda"),
   formVenda: document.getElementById("form-venda"),
+  tituloModalVenda: document.getElementById("titulo-modal-venda"),
   vendaCliente: document.getElementById("venda-cliente"),
   vendaData: document.getElementById("venda-data"),
   vendaEndereco: document.getElementById("venda-endereco"),
@@ -65,6 +74,7 @@ const el = {
   btnFecharVenda: document.getElementById("btn-fechar-venda"),
   btnLimparVenda: document.getElementById("btn-limpar-venda"),
   btnCancelarVenda: document.getElementById("btn-cancelar-venda"),
+  btnSalvarVenda: document.getElementById("btn-salvar-venda"),
 
   modalVendidos: document.getElementById("modal-vendidos"),
   descricaoVendidos: document.getElementById("descricao-vendidos"),
@@ -595,10 +605,21 @@ function dataLocalISO() {
   return `${ano}-${mes}-${dia}`;
 }
 
+function abrirNovaVenda() {
+  if (estado.rascunhoNovaVenda) restaurarRascunhoNovaVenda();
+  estado.modoFormularioVenda = "nova";
+  estado.chaveEdicaoVenda = null;
+  estado.vendaOriginalEdicao = null;
+  definirModoFormularioVenda();
+  abrirModalVenda();
+}
+
 function abrirModalVenda() {
   if (!el.modalVenda) return;
 
-  if (!estado.idVendaAtual) estado.idVendaAtual = gerarIdVendaCliente();
+  if (estado.modoFormularioVenda === "nova" && !estado.idVendaAtual) {
+    estado.idVendaAtual = gerarIdVendaCliente();
+  }
   renderizarResultadosVenda();
   renderizarItensVenda();
 
@@ -608,6 +629,19 @@ function abrirModalVenda() {
     el.modalVenda.setAttribute("open", "");
   }
   el.vendaCliente?.focus();
+}
+
+function definirModoFormularioVenda() {
+  const editando = estado.modoFormularioVenda === "editar";
+  if (el.tituloModalVenda) el.tituloModalVenda.textContent = editando ? "Editar venda" : "Nova venda";
+  if (el.btnSalvarVenda) el.btnSalvarVenda.textContent = editando ? "Salvar edição" : "Registrar venda";
+  if (el.btnLimparVenda) el.btnLimparVenda.hidden = editando;
+  const aviso = el.modalVenda?.querySelector(".aviso-venda");
+  if (aviso) {
+    aviso.textContent = editando
+      ? "As alterações ficam em rascunho até salvar. A senha será solicitada para atualizar a venda e o estoque."
+      : "Ao registrar, será solicitada a senha do vendedor e o estoque será atualizado.";
+  }
 }
 
 function limparFichaVenda() {
@@ -633,7 +667,9 @@ function temRascunhoVenda() {
     el.vendaObservacao,
   ].some((campo) => campo?.value.trim());
   const dataAlterada = el.vendaData?.value && el.vendaData.value !== estado.dataVendaPadrao;
-  return camposPreenchidos || Boolean(dataAlterada) || estado.itensVenda.length > 0;
+  const rascunhoAtivo = estado.modoFormularioVenda === "nova" &&
+    (camposPreenchidos || Boolean(dataAlterada) || estado.itensVenda.length > 0);
+  return Boolean(rascunhoAtivo || estado.rascunhoNovaVenda || estado.rascunhosEdicaoVenda.size > 0);
 }
 
 function protegerRecarregamento(evento) {
@@ -650,11 +686,150 @@ function gerarIdVendaCliente() {
 }
 
 function fecharModalVenda() {
+  const voltandoParaLista = estado.modoFormularioVenda === "editar";
+  if (voltandoParaLista) guardarRascunhoEdicaoVenda();
   if (typeof el.modalVenda?.close === "function") {
     el.modalVenda.close();
   } else {
     el.modalVenda?.removeAttribute("open");
   }
+  if (voltandoParaLista) {
+    estado.modoFormularioVenda = "nova";
+    estado.chaveEdicaoVenda = null;
+    estado.vendaOriginalEdicao = null;
+    limparFichaVenda();
+    definirModoFormularioVenda();
+    mostrarListaEdicaoVendas();
+  }
+}
+
+function obterChaveEdicaoVenda(venda) {
+  return venda.idVenda
+    ? `id:${venda.idVenda}`
+    : venda.chaveEdicao || `linhas:${(venda.linhasVenda || []).join(",")}`;
+}
+
+function criarRascunhoEdicaoVenda(venda) {
+  const itensPorLinha = new Map();
+  for (const item of venda.itens || []) {
+    const linha = Number(item.linhaEstoque);
+    if (!Number.isInteger(linha) || linha < 2) continue;
+    const estoque = estado.itens.find((produto) => produto.linha === linha);
+    if (!estoque) continue;
+    const existente = itensPorLinha.get(estoque.id);
+    if (existente) existente.quantidade += Math.max(0, Number(item.quantidade) || 0);
+    else {
+      itensPorLinha.set(estoque.id, {
+        id: estoque.id,
+        nome: estoque.nome,
+        cor: estoque.cor,
+        quantidade: Math.max(0, Number(item.quantidade) || 0),
+      });
+    }
+  }
+  return {
+    cliente: venda.cliente || "",
+    data: venda.data || "",
+    endereco: venda.endereco || "",
+    telefone: venda.telefone || "",
+    observacao: venda.observacao || "",
+    vendedor: venda.vendedor || "",
+    itens: Array.from(itensPorLinha.values()).filter((item) => item.quantidade > 0),
+  };
+}
+
+function guardarRascunhoEdicaoVenda() {
+  if (estado.modoFormularioVenda !== "editar" || !estado.chaveEdicaoVenda) return;
+  estado.rascunhosEdicaoVenda.set(estado.chaveEdicaoVenda, {
+    cliente: el.vendaCliente?.value.trim() || "",
+    data: el.vendaData?.value || "",
+    endereco: el.vendaEndereco?.value.trim() || "",
+    telefone: el.vendaTelefone?.value.trim() || "",
+    observacao: el.vendaObservacao?.value.trim() || "",
+    vendedor: el.vendaVendedor?.value.trim() || "",
+    itens: estado.itensVenda.map((item) => ({ ...item })),
+  });
+}
+
+function guardarRascunhoNovaVenda() {
+  if (estado.modoFormularioVenda !== "nova") return;
+  const camposPreenchidos = [
+    el.vendaCliente,
+    el.vendaEndereco,
+    el.vendaTelefone,
+    el.vendaVendedor,
+    el.vendaObservacao,
+  ].some((campo) => campo?.value.trim());
+  const dataAlterada = el.vendaData?.value && el.vendaData.value !== estado.dataVendaPadrao;
+  if (!camposPreenchidos && !dataAlterada && estado.itensVenda.length === 0) return;
+  estado.rascunhoNovaVenda = {
+    cliente: el.vendaCliente.value,
+    data: el.vendaData.value,
+    endereco: el.vendaEndereco.value,
+    telefone: el.vendaTelefone.value,
+    observacao: el.vendaObservacao.value,
+    vendedor: el.vendaVendedor.value,
+    idVenda: estado.idVendaAtual,
+    itens: estado.itensVenda.map((item) => ({ ...item })),
+  };
+}
+
+function restaurarRascunhoNovaVenda() {
+  const rascunho = estado.rascunhoNovaVenda;
+  if (!rascunho) return;
+  el.formVenda?.reset();
+  el.vendaCliente.value = rascunho.cliente;
+  el.vendaData.value = rascunho.data;
+  el.vendaEndereco.value = rascunho.endereco;
+  el.vendaTelefone.value = rascunho.telefone;
+  el.vendaObservacao.value = rascunho.observacao;
+  el.vendaVendedor.value = rascunho.vendedor;
+  estado.idVendaAtual = rascunho.idVenda;
+  estado.itensVenda = rascunho.itens.map((item) => ({ ...item }));
+  estado.rascunhoNovaVenda = null;
+  renderizarItensVenda();
+}
+
+async function abrirEditorVenda(venda) {
+  if (obterItensAlterados().length > 0) {
+    definirStatus("Salve ou descarte as alterações do estoque antes de editar uma venda.", "erro");
+    return;
+  }
+  if (!venda?.editavel) return;
+  if (!await carregarEstoque()) return;
+
+  const chave = obterChaveEdicaoVenda(venda);
+  estado.modoFormularioVenda = "editar";
+  estado.chaveEdicaoVenda = chave;
+  estado.vendaOriginalEdicao = JSON.parse(JSON.stringify(venda));
+  const rascunho = estado.rascunhosEdicaoVenda.get(chave) || criarRascunhoEdicaoVenda(venda);
+  el.formVenda?.reset();
+  el.vendaCliente.value = rascunho.cliente;
+  el.vendaData.value = rascunho.data;
+  el.vendaEndereco.value = rascunho.endereco;
+  el.vendaTelefone.value = rascunho.telefone;
+  el.vendaObservacao.value = rascunho.observacao;
+  el.vendaVendedor.value = rascunho.vendedor;
+  estado.itensVenda = rascunho.itens.map((item) => ({ ...item }));
+  estado.idVendaAtual = null;
+  if (el.statusVenda) {
+    el.statusVenda.hidden = true;
+    el.statusVenda.textContent = "";
+  }
+  definirModoFormularioVenda();
+  guardarRascunhoEdicaoVenda();
+  fecharModalVendidos(true);
+  abrirModalVenda();
+}
+
+function mostrarListaEdicaoVendas() {
+  if (!el.modalVendidos || estado.modoVendas !== "editar") return;
+  if (el.formVendidos) el.formVendidos.hidden = true;
+  if (el.conteudoVendidos) el.conteudoVendidos.hidden = false;
+  if (el.descricaoVendidos) el.descricaoVendidos.textContent = "Escolha uma venda para editar. Os rascunhos são mantidos até serem salvos.";
+  renderizarVendas();
+  if (typeof el.modalVendidos.showModal === "function") el.modalVendidos.showModal();
+  else el.modalVendidos.setAttribute("open", "");
 }
 
 function renderizarResultadosVenda() {
@@ -688,7 +863,9 @@ function renderizarResultadosVenda() {
   const fragmento = document.createDocumentFragment();
 
   for (const { item } of resultados) {
-    const semEstoque = Number(item.quantidadeAtual) <= 0;
+    const quantidadeRascunho = estado.itensVenda.find((produto) => produto.id === item.id)?.quantidade || 0;
+    const quantidadeMaxima = obterLimiteQuantidadeVenda(item);
+    const semEstoque = quantidadeRascunho >= quantidadeMaxima;
     const li = document.createElement("li");
     li.className = `resultado-venda${semEstoque ? " sem-estoque" : ""}`;
 
@@ -699,7 +876,7 @@ function renderizarResultadosVenda() {
     nome.textContent = item.nome || "Produto sem nome";
     const detalhe = document.createElement("div");
     detalhe.className = "detalhe-produto-venda";
-    detalhe.textContent = `${item.cor ? `Cor ${item.cor} · ` : ""}Estoque: ${item.quantidadeAtual}`;
+    detalhe.textContent = `${item.cor ? `Cor ${item.cor} · ` : ""}Estoque: ${item.quantidadeAtual}${estado.modoFormularioVenda === "editar" ? ` · Na venda: ${quantidadeRascunho}/${quantidadeMaxima}` : ` · Disponível: ${Math.max(0, quantidadeMaxima - quantidadeRascunho)}`}`;
     dados.append(nome, detalhe);
 
     const btnAdicionar = document.createElement("button");
@@ -709,10 +886,9 @@ function renderizarResultadosVenda() {
     btnAdicionar.setAttribute("aria-label", `Adicionar ${item.nome}${item.cor ? `, cor ${item.cor}` : ""}`);
     btnAdicionar.disabled = semEstoque;
     if (semEstoque) {
-      btnAdicionar.setAttribute("aria-label", `${item.nome}${item.cor ? `, cor ${item.cor}` : ""} sem unidades em estoque`);
-    } else {
-      btnAdicionar.addEventListener("click", () => adicionarProdutoAVenda(item));
+      btnAdicionar.setAttribute("aria-label", `${item.nome}${item.cor ? `, cor ${item.cor}` : ""} sem unidades disponíveis para esta venda`);
     }
+    btnAdicionar.addEventListener("click", () => adicionarProdutoAVenda(item));
 
     li.append(dados, btnAdicionar);
     fragmento.appendChild(li);
@@ -721,10 +897,26 @@ function renderizarResultadosVenda() {
   el.resultadosProdutosVenda.appendChild(fragmento);
 }
 
+function obterQuantidadeOriginalVenda(idProduto) {
+  if (estado.modoFormularioVenda !== "editar" || !estado.vendaOriginalEdicao) return 0;
+  const produto = estado.itens.find((item) => item.id === idProduto);
+  if (!produto) return 0;
+  return (estado.vendaOriginalEdicao.itens || [])
+    .filter((item) => Number(item.linhaEstoque) === produto.linha)
+    .reduce((soma, item) => soma + Math.max(0, Number(item.quantidade) || 0), 0);
+}
+
+function obterLimiteQuantidadeVenda(item) {
+  const estoqueAtual = Math.max(0, Number(item.quantidadeAtual) || 0);
+  return estoqueAtual + obterQuantidadeOriginalVenda(item.id);
+}
+
 function adicionarProdutoAVenda(item) {
-  if (Number(item.quantidadeAtual) <= 0) return;
+  const limite = obterLimiteQuantidadeVenda(item);
+  if (limite <= 0) return;
 
   const existente = estado.itensVenda.find((produto) => produto.id === item.id);
+  if ((existente?.quantidade || 0) >= limite) return;
   if (existente) {
     existente.quantidade += 1;
   } else {
@@ -736,18 +928,23 @@ function adicionarProdutoAVenda(item) {
     });
   }
   renderizarItensVenda();
+  guardarRascunhoEdicaoVenda();
 }
 
 function alterarQuantidadeItemVenda(id, delta) {
   const item = estado.itensVenda.find((produto) => produto.id === id);
   if (!item) return;
+  const produtoEstoque = estado.itens.find((produto) => produto.id === id);
+  if (delta > 0 && (!produtoEstoque || item.quantidade >= obterLimiteQuantidadeVenda(produtoEstoque))) return;
   item.quantidade = Math.max(1, item.quantidade + delta);
   renderizarItensVenda();
+  guardarRascunhoEdicaoVenda();
 }
 
 function removerItemDaVenda(id) {
   estado.itensVenda = estado.itensVenda.filter((produto) => produto.id !== id);
   renderizarItensVenda();
+  guardarRascunhoEdicaoVenda();
 }
 
 function renderizarItensVenda() {
@@ -784,6 +981,7 @@ function renderizarItensVenda() {
     btnMenos.type = "button";
     btnMenos.className = "btn-quantidade-venda";
     btnMenos.textContent = "−";
+    btnMenos.disabled = item.quantidade <= 1;
     btnMenos.setAttribute("aria-label", `Diminuir quantidade de ${item.nome}`);
     btnMenos.addEventListener("click", () => alterarQuantidadeItemVenda(item.id, -1));
     const quantidade = document.createElement("strong");
@@ -792,6 +990,8 @@ function renderizarItensVenda() {
     btnMais.type = "button";
     btnMais.className = "btn-quantidade-venda";
     btnMais.textContent = "+";
+    const produtoEstoque = estado.itens.find((produto) => produto.id === item.id);
+    btnMais.disabled = !produtoEstoque || item.quantidade >= obterLimiteQuantidadeVenda(produtoEstoque);
     btnMais.setAttribute("aria-label", `Aumentar quantidade de ${item.nome}`);
     btnMais.addEventListener("click", () => alterarQuantidadeItemVenda(item.id, 1));
     const btnRemover = document.createElement("button");
@@ -805,6 +1005,7 @@ function renderizarItensVenda() {
     fragmento.appendChild(li);
   }
   el.itensVenda.appendChild(fragmento);
+  renderizarResultadosVenda();
 }
 
 function limparConsultaVendidos() {
@@ -830,9 +1031,17 @@ function limparConsultaVendidos() {
   }
 }
 
-function abrirModalVendidos() {
+function abrirModalVendidos(modo = "consulta") {
   if (!el.modalVendidos) return;
+  if (modo === "editar") guardarRascunhoNovaVenda();
+  estado.modoVendas = modo;
   limparConsultaVendidos();
+  if (el.btnConsultarVendidos) el.btnConsultarVendidos.textContent = modo === "editar" ? "Buscar vendas" : "Ver vendas";
+  if (el.descricaoVendidos) {
+    el.descricaoVendidos.textContent = modo === "editar"
+      ? "Informe sua senha para escolher uma venda que deseja editar."
+      : "Informe sua senha para consultar as vendas.";
+  }
   if (typeof el.modalVendidos.showModal === "function") {
     el.modalVendidos.showModal();
   } else {
@@ -841,12 +1050,14 @@ function abrirModalVendidos() {
   el.senhaVendidos?.focus();
 }
 
-function fecharModalVendidos() {
+function fecharModalVendidos(preservarLista = false) {
+  estado.preservarConsultaAoFechar = preservarLista;
   if (typeof el.modalVendidos?.close === "function") {
     el.modalVendidos.close();
   } else {
     el.modalVendidos?.removeAttribute("open");
-    limparConsultaVendidos();
+    if (!preservarLista) limparConsultaVendidos();
+    estado.preservarConsultaAoFechar = false;
   }
 }
 
@@ -881,7 +1092,9 @@ async function consultarVendas(evento) {
     }
 
     el.formVendidos.hidden = true;
-    el.descricaoVendidos.textContent = "Os produtos da mesma venda estão agrupados por cliente.";
+    el.descricaoVendidos.textContent = estado.modoVendas === "editar"
+      ? "Escolha uma venda para editar. A senha será solicitada novamente ao salvar."
+      : "Os produtos da mesma venda estão agrupados por cliente.";
     el.conteudoVendidos.hidden = false;
     estado.vendasCarregadas = Array.isArray(resultado.vendas) ? resultado.vendas : [];
     renderizarVendas();
@@ -895,7 +1108,7 @@ async function consultarVendas(evento) {
     if (idConsulta === estado.idConsultaVendas) {
       estado.consultandoVendas = false;
       el.btnConsultarVendidos.disabled = false;
-      el.btnConsultarVendidos.textContent = "Ver vendas";
+      el.btnConsultarVendidos.textContent = estado.modoVendas === "editar" ? "Buscar vendas" : "Ver vendas";
     }
   }
 }
@@ -967,6 +1180,18 @@ function renderizarVendas() {
       itens.appendChild(linhaItem);
     }
     cartao.appendChild(itens);
+    if (estado.modoVendas === "editar") {
+      const acoes = document.createElement("div");
+      acoes.className = "acoes-venda-historico";
+      const btnEditar = document.createElement("button");
+      btnEditar.type = "button";
+      btnEditar.className = "btn btn-editar-venda-cartao";
+      btnEditar.textContent = venda.editavel ? "Editar venda" : "Produto sem correspondência no estoque";
+      btnEditar.disabled = !venda.editavel;
+      btnEditar.addEventListener("click", () => abrirEditorVenda(venda));
+      acoes.appendChild(btnEditar);
+      cartao.appendChild(acoes);
+    }
     fragmento.appendChild(cartao);
   }
 
@@ -978,7 +1203,9 @@ function iniciarRegistroVenda(evento) {
   if (!el.statusVenda || estado.salvando) return;
 
   if (estado.itensVenda.length === 0) {
-    el.statusVenda.textContent = "Adicione pelo menos um produto à venda.";
+    el.statusVenda.textContent = estado.modoFormularioVenda === "editar"
+      ? "A venda precisa ter ao menos um item para salvar a edição."
+      : "Adicione pelo menos um produto à venda.";
     el.statusVenda.hidden = false;
     return;
   }
@@ -990,7 +1217,12 @@ function iniciarRegistroVenda(evento) {
 
   el.statusVenda.hidden = true;
   el.statusVenda.textContent = "";
-  abrirModalSenha("venda");
+  if (estado.modoFormularioVenda === "editar") {
+    guardarRascunhoEdicaoVenda();
+    abrirModalSenha("editarVenda");
+  } else {
+    abrirModalSenha("venda");
+  }
 }
 
 // Popup de senha para salvar
@@ -999,12 +1231,16 @@ function abrirModalSenha(operacao = "estoque") {
 
   estado.operacaoSenha = operacao;
   if (el.modalSenhaTitulo) {
-    el.modalSenhaTitulo.textContent = operacao === "venda" ? "Confirmar venda" : "Confirmar alterações";
+    el.modalSenhaTitulo.textContent = operacao === "venda"
+      ? "Confirmar venda"
+      : operacao === "editarVenda" ? "Salvar edição da venda" : "Confirmar alterações";
   }
   if (el.modalSenhaDescricao) {
     el.modalSenhaDescricao.textContent = operacao === "venda"
       ? "Digite a senha do vendedor para registrar a venda e baixar os itens do estoque."
-      : "Digite sua senha de funcionário para salvar as novas quantidades na planilha.";
+      : operacao === "editarVenda"
+        ? "Digite sua senha novamente para salvar os dados da venda e ajustar o estoque."
+        : "Digite sua senha de funcionário para salvar as novas quantidades na planilha.";
   }
   if (el.labelSenhaFuncionario) {
     el.labelSenhaFuncionario.textContent = operacao === "venda"
@@ -1018,7 +1254,7 @@ function abrirModalSenha(operacao = "estoque") {
   el.btnConfirmarSalvar.disabled = false;
   el.btnConfirmarSalvar.textContent = operacao === "venda"
     ? "Confirmar e Registrar Venda"
-    : "Confirmar e Salvar";
+    : operacao === "editarVenda" ? "Confirmar e Salvar Edição" : "Confirmar e Salvar";
 
   if (typeof el.modalSenha.showModal === "function") {
     el.modalSenha.showModal();
@@ -1052,6 +1288,9 @@ async function salvarAlteracoesComSenha(evento) {
 
   if (estado.operacaoSenha === "venda") {
     return registrarVendaComSenha(senha);
+  }
+  if (estado.operacaoSenha === "editarVenda") {
+    return editarVendaComSenha(senha);
   }
 
   const alterados = obterItensAlterados().map((item) => ({
@@ -1184,6 +1423,7 @@ async function registrarVendaComSenha(senha) {
 
     estado.salvando = false;
     fecharModalSenha();
+    estado.rascunhoNovaVenda = null;
     limparFichaVenda();
     fecharModalVenda();
     definirStatus("Venda registrada; atualizando estoque...", "ok");
@@ -1200,6 +1440,102 @@ async function registrarVendaComSenha(senha) {
     el.erroSenha.hidden = false;
     el.btnConfirmarSalvar.disabled = false;
     el.btnConfirmarSalvar.textContent = "Confirmar e Registrar Venda";
+  } finally {
+    estado.salvando = false;
+  }
+}
+
+async function editarVendaComSenha(senha) {
+  if (estado.salvando || !estado.vendaOriginalEdicao || !estado.chaveEdicaoVenda) return;
+  if (estado.itensVenda.length === 0) {
+    el.erroSenha.textContent = "A venda precisa ter ao menos um item para salvar a edição.";
+    el.erroSenha.hidden = false;
+    return;
+  }
+
+  const itens = estado.itensVenda.map((produto) => {
+    const itemEstoque = estado.itens.find((item) => item.id === produto.id);
+    return itemEstoque
+      ? {
+          linha: itemEstoque.linha,
+          nome: itemEstoque.nome,
+          cor: itemEstoque.cor,
+          quantidade: produto.quantidade,
+        }
+      : null;
+  });
+  if (itens.some((item) => !item)) {
+    el.erroSenha.textContent = "Um produto não foi localizado no estoque. Atualize os dados e tente novamente.";
+    el.erroSenha.hidden = false;
+    return;
+  }
+
+  const vendaOriginal = estado.vendaOriginalEdicao;
+  const chaveOriginal = estado.chaveEdicaoVenda;
+  estado.salvando = true;
+  el.erroSenha.hidden = true;
+  el.btnConfirmarSalvar.disabled = true;
+  el.btnConfirmarSalvar.textContent = "Verificando senha e salvando...";
+
+  try {
+    const resposta = await fetch(WEB_APP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        acao: "editarvenda",
+        senha,
+        venda: {
+          idVenda: vendaOriginal.idVenda,
+          chaveEdicao: vendaOriginal.chaveEdicao,
+          linhasVenda: vendaOriginal.linhasVenda,
+          cliente: el.vendaCliente.value.trim(),
+          data: el.vendaData.value,
+          endereco: el.vendaEndereco.value.trim(),
+          telefone: el.vendaTelefone.value.trim(),
+          observacao: el.vendaObservacao.value.trim(),
+          vendedor: el.vendaVendedor.value.trim(),
+          itens,
+        },
+      }),
+    });
+    if (!resposta.ok) throw new Error(`HTTP ${resposta.status}`);
+
+    const resultado = await resposta.json();
+    if (!resultado || resultado.ok !== true || !resultado.venda) {
+      el.erroSenha.textContent = resultado?.mensagem || "Não foi possível salvar a edição.";
+      el.erroSenha.hidden = false;
+      el.btnConfirmarSalvar.disabled = false;
+      el.btnConfirmarSalvar.textContent = "Confirmar e Salvar Edição";
+      return;
+    }
+
+    estado.rascunhosEdicaoVenda.delete(chaveOriginal);
+    const indiceVenda = estado.vendasCarregadas.findIndex((venda) => obterChaveEdicaoVenda(venda) === chaveOriginal);
+    if (indiceVenda >= 0) {
+      if (resultado.venda.itens.length === 0) estado.vendasCarregadas.splice(indiceVenda, 1);
+      else estado.vendasCarregadas[indiceVenda] = resultado.venda;
+    }
+
+    estado.salvando = false;
+    fecharModalSenha();
+    estado.modoFormularioVenda = "nova";
+    estado.chaveEdicaoVenda = null;
+    estado.vendaOriginalEdicao = null;
+    limparFichaVenda();
+    definirModoFormularioVenda();
+    if (typeof el.modalVenda.close === "function") el.modalVenda.close();
+    else el.modalVenda.removeAttribute("open");
+    mostrarListaEdicaoVendas();
+    definirStatus("Edição salva; atualizando estoque...", "ok");
+    const estoqueCarregado = await carregarEstoque();
+    if (estoqueCarregado) definirStatus("Venda editada e estoque atualizado", "ok");
+    else definirStatus("Venda editada; não foi possível atualizar a tela do estoque", "erro");
+  } catch (erro) {
+    console.error("Erro ao editar venda:", erro);
+    el.erroSenha.textContent = "Não foi possível confirmar o resultado. Consulte as vendas antes de tentar novamente.";
+    el.erroSenha.hidden = false;
+    el.btnConfirmarSalvar.disabled = false;
+    el.btnConfirmarSalvar.textContent = "Confirmar e Salvar Edição";
   } finally {
     estado.salvando = false;
   }
@@ -1222,18 +1558,40 @@ el.btnCancelarModal?.addEventListener("click", fecharModalSenha);
 el.formSalvar?.addEventListener("submit", salvarAlteracoesComSenha);
 el.btnAlternarTema?.addEventListener("click", alternarTema);
 el.btnAbrirVendidos?.addEventListener("click", abrirModalVendidos);
+el.btnAbrirEdicaoVenda?.addEventListener("click", () => abrirModalVendidos("editar"));
 el.btnFecharVendidos?.addEventListener("click", fecharModalVendidos);
 el.btnCancelarVendidos?.addEventListener("click", fecharModalVendidos);
 el.formVendidos?.addEventListener("submit", consultarVendas);
-el.modalVendidos?.addEventListener("close", limparConsultaVendidos);
+el.modalVendidos?.addEventListener("close", () => {
+  if (estado.preservarConsultaAoFechar) {
+    estado.preservarConsultaAoFechar = false;
+    return;
+  }
+  limparConsultaVendidos();
+});
 el.filtroVendidosCliente?.addEventListener("input", renderizarVendas);
 el.filtroVendidosMovel?.addEventListener("input", renderizarVendas);
 el.filtroVendidosData?.addEventListener("input", renderizarVendas);
-el.btnAbrirVenda?.addEventListener("click", abrirModalVenda);
+el.btnAbrirVenda?.addEventListener("click", abrirNovaVenda);
 el.btnFecharVenda?.addEventListener("click", fecharModalVenda);
 el.btnLimparVenda?.addEventListener("click", limparFichaVenda);
 el.btnCancelarVenda?.addEventListener("click", fecharModalVenda);
+el.modalVenda?.addEventListener("cancel", (evento) => {
+  evento.preventDefault();
+  fecharModalVenda();
+});
 el.buscaProdutoVenda?.addEventListener("input", renderizarResultadosVenda);
+[
+  el.vendaCliente,
+  el.vendaData,
+  el.vendaEndereco,
+  el.vendaTelefone,
+  el.vendaObservacao,
+  el.vendaVendedor,
+].forEach((campo) => {
+  campo?.addEventListener("input", guardarRascunhoEdicaoVenda);
+  campo?.addEventListener("change", guardarRascunhoEdicaoVenda);
+});
 el.formVenda?.addEventListener("submit", iniciarRegistroVenda);
 window.addEventListener("beforeunload", protegerRecarregamento);
 
@@ -1241,7 +1599,7 @@ window.addEventListener("beforeunload", protegerRecarregamento);
 limparFichaVenda();
 inicializarTema();
 window.addEventListener("pageshow", (evento) => {
-  if (evento.persisted) limparFichaVenda();
+  if (evento.persisted && estado.modoFormularioVenda !== "editar") limparFichaVenda();
 });
 
 // Garante que a imagem suma se o usuário soltar o dedo/mouse fora do botão

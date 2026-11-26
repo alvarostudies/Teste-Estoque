@@ -1,4 +1,4 @@
-const CACHE_NAME = "estoque-loja-v2";
+const CACHE_NAME = "estoque-loja-v3";
 const ARQUIVOS_ESTATICOS = [
   "./",
   "./index.html",

@@ -87,7 +87,7 @@ body {
 /* Filtros */
 .filtros {
   display: grid;
-  grid-template-columns: 1fr 1fr repeat(4, auto);
+  grid-template-columns: 1fr 1fr repeat(5, auto);
   gap: 12px;
   align-items: end;
   background: var(--surface);
@@ -179,6 +179,10 @@ input:focus {
   cursor: wait;
 }
 
+.btn[hidden] {
+  display: none;
+}
+
 .btn-primario {
   background: var(--primary);
   color: #ffffff;
@@ -195,6 +199,15 @@ input:focus {
 
 .btn-vendidos:hover {
   background: #1d4ed8;
+}
+
+.btn-editar-venda {
+  background: #7c3aed;
+  color: #ffffff;
+}
+
+.btn-editar-venda:hover {
+  background: #6d28d9;
 }
 
 .btn-secundario {
@@ -620,6 +633,21 @@ input:focus {
   font-size: 0.9rem;
 }
 
+.acoes-venda-historico {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.btn-editar-venda-cartao {
+  background: #7c3aed;
+  color: #ffffff;
+}
+
+.btn-editar-venda-cartao:hover {
+  background: #6d28d9;
+}
+
 .form-venda {
   gap: 18px;
 }
@@ -829,6 +857,16 @@ body[data-tema="noturno"] .btn-vendidos {
 
 body[data-tema="noturno"] .btn-vendidos:hover {
   background: #2563eb;
+}
+
+body[data-tema="noturno"] .btn-editar-venda,
+body[data-tema="noturno"] .btn-editar-venda-cartao {
+  background: #8b5cf6;
+}
+
+body[data-tema="noturno"] .btn-editar-venda:hover,
+body[data-tema="noturno"] .btn-editar-venda-cartao:hover {
+  background: #7c3aed;
 }
 
 body[data-tema="noturno"] .tabela-estoque tbody tr.alterada {
