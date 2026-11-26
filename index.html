@@ -7,6 +7,12 @@
   <link rel="stylesheet" href="style.css" />
   <meta name="theme-color" content="#16a34a" />
   <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Estoque Loja" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 </head>
 <body>
   <button type="button" id="btn-alternar-tema" class="btn-tema" aria-label="Ativar modo noturno" title="Ativar modo noturno">
@@ -100,6 +106,7 @@
               <th>Produto</th>
               <th>Cor</th>
               <th class="col-qtd">Quantidade</th>
+              <th>Preço (PIX / Cartão)</th>
             </tr>
           </thead>
           <tbody id="corpo-estoque">
@@ -118,6 +125,12 @@
                   <button type="button" class="btn-qtd btn-menos" aria-label="Diminuir quantidade">−</button>
                   <span class="valor-qtd" data-qtd-atual="12" data-qtd-original="12">Carregando Quantidade...</span>
                   <button type="button" class="btn-qtd btn-mais" aria-label="Aumentar quantidade">+</button>
+                </div>
+              </td>
+              <td class="col-preco" data-label="Preço">
+                <div class="grupo-preco">
+                  <label class="rotulo-preco" for="preco-exemplo">PIX / Cartão</label>
+                  <input type="text" id="preco-exemplo" class="campo-preco" inputmode="decimal" placeholder="Ex.: 100,00 / 110,00" />
                 </div>
               </td>
             </tr>
@@ -139,7 +152,7 @@
     </div>
   </div>
 
-  <!-- Barra inferior que aparece apenas quando há quantidades alteradas -->
+  <!-- Barra inferior que aparece quando há alterações de quantidade ou preço -->
   <div id="barra-salvar" class="barra-salvar" aria-live="polite">
     <div class="container barra-salvar-conteudo">
       <span id="resumo-alteracoes" class="resumo-alteracoes">
@@ -343,7 +356,7 @@
     <form id="form-salvar-estoque" method="dialog" class="modal-conteudo">
       <h2 id="modal-senha-titulo">Confirmar alterações</h2>
       <p id="modal-senha-descricao" class="modal-descricao">
-        Digite sua senha de funcionário para salvar as novas quantidades na planilha.
+        Digite sua senha de funcionário para salvar as quantidades e os preços na planilha.
       </p>
 
       <div class="campo-modal">

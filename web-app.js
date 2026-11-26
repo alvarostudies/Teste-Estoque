@@ -22,6 +22,41 @@ function responderJson(objeto) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+// Localiza preço e imagem pelo cabeçalho, mantendo compatibilidade com a planilha antiga.
+function obterColunasEstoque(aba) {
+  const ultimaColuna = Math.max(4, aba.getLastColumn());
+  const cabecalhos = aba.getRange(1, 1, 1, ultimaColuna).getDisplayValues()[0]
+    .map((valor) => normalizarChaveVenda(valor));
+  let colunaPreco = cabecalhos.findIndex((valor) => valor.includes("preco") || valor.includes("valor")) + 1;
+  let colunaImagem = cabecalhos.findIndex((valor) => valor.includes("imagem") || valor.includes("foto")) + 1;
+
+  // Sem cabeçalho de imagem, tenta localizar URLs antes de recorrer à última coluna antiga.
+  if (!colunaImagem && aba.getLastRow() >= 2) {
+    const linhasAmostra = Math.min(20, aba.getLastRow() - 1);
+    for (let coluna = 4; coluna <= ultimaColuna && !colunaImagem; coluna++) {
+      const valores = aba.getRange(2, coluna, linhasAmostra, 1).getDisplayValues();
+      if (valores.some((linha) => /^https?:\/\//i.test(String(linha[0] ?? "").trim()))) {
+        colunaImagem = coluna;
+      }
+    }
+  }
+  if (!colunaImagem) colunaImagem = ultimaColuna;
+  if (!colunaPreco) {
+    const candidatas = [];
+    for (let coluna = 4; coluna <= ultimaColuna; coluna++) {
+      if (coluna !== colunaImagem) candidatas.push(coluna);
+    }
+    if (candidatas.length === 1) colunaPreco = candidatas[0];
+  }
+  if (colunaImagem === colunaPreco) {
+    const alternativaImagem = Array.from({ length: Math.max(0, ultimaColuna - 3) }, (_, indice) => indice + 4)
+      .find((coluna) => coluna !== colunaPreco);
+    colunaImagem = alternativaImagem || 0;
+  }
+
+  return { ultimaColuna, colunaPreco, colunaImagem };
+}
+
 // Lê o estoque ou a lista de afazeres sem expor dados da aba Usuarios.
 function doGet(e) {
   try {
@@ -35,15 +70,15 @@ function doGet(e) {
     }
 
     const ultimaLinha = aba.getLastRow();
-    const ultimaColuna = aba.getLastColumn();
-
-    if (ultimaLinha < 2 || ultimaColuna < 3) {
+    if (ultimaLinha < 2 || aba.getLastColumn() < 3) {
       return responderJson({ ok: true, itens: [] });
     }
 
-    // A imagem permanece na última coluna da aba; A:C guardam nome, cor e quantidade.
-    const colunaImagem = Math.max(4, ultimaColuna);
-    const valores = aba.getRange(2, 1, ultimaLinha - 1, colunaImagem).getValues();
+    const colunas = obterColunasEstoque(aba);
+    const valores = aba.getRange(2, 1, ultimaLinha - 1, colunas.ultimaColuna).getValues();
+    const precos = colunas.colunaPreco
+      ? aba.getRange(2, colunas.colunaPreco, ultimaLinha - 1, 1).getDisplayValues()
+      : [];
     const itens = [];
 
     for (let i = 0; i < valores.length; i++) {
@@ -56,8 +91,11 @@ function doGet(e) {
       if (!nome && !cor) continue;
 
       const qtd = Math.max(0, parseInt(linha[2], 10) || 0);
-      const imagemBruta = String(linha[colunaImagem - 1] ?? "").trim();
+      const imagemBruta = colunas.colunaImagem
+        ? String(linha[colunas.colunaImagem - 1] ?? "").trim()
+        : "";
       const imagem = /^https?:\/\//i.test(imagemBruta) ? imagemBruta : "";
+      const preco = colunas.colunaPreco ? String(precos[i][0] ?? "").trim() : "";
 
       itens.push({
         id: "linha-" + linhaPlanilha,
@@ -65,6 +103,7 @@ function doGet(e) {
         nome: nome,
         cor: cor,
         quantidade: qtd,
+        preco: preco,
         imagem: imagem
       });
     }
@@ -133,31 +172,60 @@ function doPost(e) {
       return responderJson({ ok: false, mensagem: "Aba 'Estoque' não encontrada." });
     }
 
+    const colunasEstoque = obterColunasEstoque(abaEstoque);
+
+    // Confere os preços de todas as linhas antes de gravar qualquer alteração.
+    for (const item of alteracoes) {
+      const linha = Number(item.linha);
+      if (!Number.isInteger(linha) || linha < 2 || linha > abaEstoque.getLastRow()) continue;
+      const precoAnterior = String(item.precoAnterior ?? "").trim();
+      const precoNovo = String(item.precoNovo ?? "").trim();
+      if (item.precoNovo === undefined || precoNovo === precoAnterior) continue;
+      if (precoNovo.length > 100 || precoNovo.split("/").length > 2) {
+        return responderJson({ ok: false, mensagem: "Informe até dois preços, PIX e cartão, separados por uma única barra (/)." });
+      }
+      if (!colunasEstoque.colunaPreco) {
+        return responderJson({ ok: false, mensagem: "A coluna de preço não foi encontrada na aba Estoque." });
+      }
+      const precoAtual = String(abaEstoque.getRange(linha, colunasEstoque.colunaPreco).getDisplayValue() ?? "").trim();
+      if (precoAtual !== precoAnterior) {
+        return responderJson({ ok: false, mensagem: "O preço deste produto mudou na planilha. Recarregue o estoque e tente novamente." });
+      }
+    }
+
     // Aplica alterações da tela de estoque e prepara o histórico dos valores anteriores/novos.
     const registrosHistorico = [];
 
     for (const item of alteracoes) {
       const linha = Number(item.linha);
       const novaQtd = Math.max(0, parseInt(item.quantidadeNova, 10) || 0);
+      const precoAnterior = String(item.precoAnterior ?? "").trim();
+      const precoNovo = String(item.precoNovo ?? "").trim();
+      const alterouPreco = item.precoNovo !== undefined && precoNovo !== precoAnterior;
 
       if (!Number.isInteger(linha) || linha < 2 || linha > abaEstoque.getLastRow()) {
         continue;
       }
-
       // Coluna 3 = Quantidade
       const celulaQtd = abaEstoque.getRange(linha, 3);
       const qtdAnterior = Math.max(0, parseInt(celulaQtd.getValue(), 10) || 0);
+      const celulaPreco = alterouPreco
+        ? abaEstoque.getRange(linha, colunasEstoque.colunaPreco)
+        : null;
 
-      celulaQtd.setValue(novaQtd);
+      if (novaQtd !== qtdAnterior) celulaQtd.setValue(novaQtd);
+      if (alterouPreco) celulaPreco.setValue(textoSeguroPlanilha(precoNovo));
 
-      registrosHistorico.push([
-        new Date(),
-        usuario.nome,
-        String(item.nome ?? abaEstoque.getRange(linha, 1).getValue()),
-        String(item.cor ?? abaEstoque.getRange(linha, 2).getValue()),
-        qtdAnterior,
-        novaQtd
-      ]);
+      if (novaQtd !== qtdAnterior) {
+        registrosHistorico.push([
+          new Date(),
+          usuario.nome,
+          String(item.nome ?? abaEstoque.getRange(linha, 1).getValue()),
+          String(item.cor ?? abaEstoque.getRange(linha, 2).getValue()),
+          qtdAnterior,
+          novaQtd
+        ]);
+      }
     }
 
     if (registrosHistorico.length > 0) {
@@ -238,7 +306,7 @@ function removerAfazer(ss, idRecebido) {
   return responderJson({ ok: true });
 }
 
-// Adiciona as cores enviadas; variantes existentes recebem a nova quantidade na mesma linha.
+// Adiciona as cores enviadas; variantes existentes recebem a quantidade na mesma linha.
 function adicionarProduto(ss, usuario, produto) {
   if (!produto || typeof produto !== "object") {
     return responderJson({ ok: false, mensagem: "Dados do produto inválidos." });
@@ -282,9 +350,11 @@ function adicionarProduto(ss, usuario, produto) {
   if (!abaEstoque) return responderJson({ ok: false, mensagem: "Aba 'Estoque' não encontrada." });
 
   const ultimaLinha = abaEstoque.getLastRow();
-  const colunaImagem = Math.max(4, abaEstoque.getLastColumn());
+  const colunasEstoque = obterColunasEstoque(abaEstoque);
+  const colunaImagem = colunasEstoque.colunaImagem;
+  const ultimaColuna = colunasEstoque.ultimaColuna;
   const dadosEstoque = ultimaLinha >= 2
-    ? abaEstoque.getRange(2, 1, ultimaLinha - 1, colunaImagem).getValues()
+    ? abaEstoque.getRange(2, 1, ultimaLinha - 1, ultimaColuna).getValues()
     : [];
   const linhasPorChave = new Map();
   for (let indice = 0; indice < dadosEstoque.length; indice++) {
@@ -321,11 +391,11 @@ function adicionarProduto(ss, usuario, produto) {
         imagemNova: imagem || "",
       });
     } else {
-      const novaLinha = new Array(colunaImagem).fill("");
+      const novaLinha = new Array(ultimaColuna).fill("");
       novaLinha[0] = textoSeguroPlanilha(nome);
       novaLinha[1] = textoSeguroPlanilha(cor);
       novaLinha[2] = quantidade;
-      novaLinha[colunaImagem - 1] = imagem ? textoSeguroPlanilha(imagem) : "";
+      if (colunaImagem) novaLinha[colunaImagem - 1] = imagem ? textoSeguroPlanilha(imagem) : "";
       novasLinhas.push(novaLinha);
     }
   }
@@ -344,17 +414,17 @@ function adicionarProduto(ss, usuario, produto) {
     for (const atualizacao of atualizacoes) {
       atualizacoesGravadas.push(atualizacao);
       abaEstoque.getRange(atualizacao.linha, 3).setValue(atualizacao.quantidadeNova);
-      if (atualizacao.imagemNova) abaEstoque.getRange(atualizacao.linha, colunaImagem).setValue(textoSeguroPlanilha(atualizacao.imagemNova));
+      if (atualizacao.imagemNova && colunaImagem) abaEstoque.getRange(atualizacao.linha, colunaImagem).setValue(textoSeguroPlanilha(atualizacao.imagemNova));
     }
     if (novasLinhas.length > 0) {
       linhasNovasGravadas = true;
-      abaEstoque.getRange(primeiraLinhaNova, 1, novasLinhas.length, 4).setValues(novasLinhas);
+      abaEstoque.getRange(primeiraLinhaNova, 1, novasLinhas.length, ultimaColuna).setValues(novasLinhas);
     }
   } catch (erro) {
     const falhasRollback = [];
     if (linhasNovasGravadas) {
       try {
-        abaEstoque.getRange(primeiraLinhaNova, 1, novasLinhas.length, colunaImagem).clearContent();
+        abaEstoque.getRange(primeiraLinhaNova, 1, novasLinhas.length, ultimaColuna).clearContent();
       } catch (erroRollback) {
         falhasRollback.push(erroRollback.message);
       }
@@ -362,7 +432,7 @@ function adicionarProduto(ss, usuario, produto) {
     for (let indice = atualizacoesGravadas.length - 1; indice >= 0; indice--) {
       const atualizacao = atualizacoesGravadas[indice];
       try {
-        abaEstoque.getRange(atualizacao.linha, 1, 1, colunaImagem).setValues([atualizacao.valoresOriginais]);
+        abaEstoque.getRange(atualizacao.linha, 1, 1, ultimaColuna).setValues([atualizacao.valoresOriginais]);
       } catch (erroRollback) {
         falhasRollback.push(erroRollback.message);
       }
@@ -392,10 +462,11 @@ function removerProduto(ss, usuario, produto) {
   const abaEstoque = ss.getSheetByName(ABA_ESTOQUE);
   if (!abaEstoque) return responderJson({ ok: false, mensagem: "Aba 'Estoque' não encontrada." });
   const ultimaLinha = abaEstoque.getLastRow();
-  const colunaImagem = Math.max(4, abaEstoque.getLastColumn());
+  const colunasEstoque = obterColunasEstoque(abaEstoque);
+  const ultimaColuna = colunasEstoque.ultimaColuna;
   if (ultimaLinha < 2) return responderJson({ ok: false, mensagem: "O estoque está vazio." });
 
-  const dados = abaEstoque.getRange(2, 1, ultimaLinha - 1, colunaImagem).getValues();
+  const dados = abaEstoque.getRange(2, 1, ultimaLinha - 1, ultimaColuna).getValues();
   const chaveProcurada = normalizarChaveVenda(nome);
   const linhasEncontradas = [];
   for (let indice = 0; indice < dados.length; indice++) {
@@ -412,14 +483,14 @@ function removerProduto(ss, usuario, produto) {
   try {
     for (const item of linhasEncontradas) {
       linhasRemovidas.push(item);
-      abaEstoque.getRange(item.linha, 1, 1, colunaImagem).clearContent();
+      abaEstoque.getRange(item.linha, 1, 1, ultimaColuna).clearContent();
     }
   } catch (erro) {
     const falhasRollback = [];
     for (let indice = linhasRemovidas.length - 1; indice >= 0; indice--) {
       const item = linhasRemovidas[indice];
       try {
-        abaEstoque.getRange(item.linha, 1, 1, colunaImagem).setValues([item.valores]);
+        abaEstoque.getRange(item.linha, 1, 1, ultimaColuna).setValues([item.valores]);
       } catch (erroRollback) {
         falhasRollback.push(erroRollback.message);
       }

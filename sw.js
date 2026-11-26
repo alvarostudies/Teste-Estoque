@@ -1,5 +1,5 @@
 // A versão diferencia este cache dos anteriores e força a atualização dos arquivos locais.
-const CACHE_NAME = "estoque-loja-v5";
+const CACHE_NAME = "estoque-loja-v7";
 
 // Lista os arquivos da interface disponíveis mesmo quando o dispositivo estiver offline.
 const ARQUIVOS_ESTATICOS = [
@@ -8,8 +8,11 @@ const ARQUIVOS_ESTATICOS = [
   "./style.css",
   "./app.js",
   "./manifest.json",
+  "./favicon.svg",
+  "./icon-180.png",
   "./icon-192.png",
-  "./icon-512.png"
+  "./icon-512.png",
+  "./icon-512-maskable.png"
 ];
 
 // Instala o service worker, pré-carrega os arquivos essenciais e assume o controle rapidamente.

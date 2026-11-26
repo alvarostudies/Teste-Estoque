@@ -441,6 +441,40 @@ input:focus {
   text-align: right;
 }
 
+.col-preco {
+  min-width: 190px;
+}
+
+.grupo-preco {
+  display: grid;
+  gap: 4px;
+  max-width: 240px;
+}
+
+.rotulo-preco {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.campo-preco {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.campo-preco:focus {
+  border-color: var(--primary);
+  outline: 2px solid color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
 /* Nome do produto com gatilho de imagem */
 .nome-produto {
   background: none;
@@ -1272,6 +1306,19 @@ body[data-tema="noturno"] .aviso-venda {
 
   .col-cor {
     align-self: center;
+  }
+
+  .col-preco {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .grupo-preco {
+    max-width: none;
+  }
+
+  .rotulo-preco {
+    font-size: 0.75rem;
   }
 
   .col-qtd {

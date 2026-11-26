@@ -3,7 +3,7 @@ const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw6qXvKfxN1c1w8M9qK
 
 // Centraliza o estado da tela: estoque, rascunhos de vendas e operações em andamento.
 const estado = {
-  itens: [], // { id, linha, nome, cor, quantidadeOriginal, quantidadeAtual, imagem }
+  itens: [], // { id, linha, nome, cor, quantidadeOriginal, quantidadeAtual, precoOriginal, precoAtual, imagem }
   itensVenda: [], // Itens da venda em preparação no popup.
   idVendaAtual: null,
   dataVendaPadrao: null,
@@ -327,7 +327,7 @@ function obterItensFiltradosEOrdenados() {
   return resultados;
 }
 
-// Normaliza os registros recebidos da planilha (colunas: 1=Nome, 2=Cor, 3=Quantidade, última=Imagem)
+// Normaliza registros do estoque, incluindo o texto de preço no formato PIX / Cartão.
 function normalizarDadosPlanilha(payload) {
   const bruto = Array.isArray(payload)
     ? payload
@@ -348,6 +348,10 @@ function normalizarDadosPlanilha(payload) {
       const qtdNum = Math.max(0, Number.parseInt(registro[2], 10) || 0);
       const imagem = String(registro[registro.length - 1] ?? "").trim();
       const urlImagem = imagem.startsWith("http") ? imagem : "";
+      const preco = registro.slice(3).find((valor) => {
+        const texto = String(valor ?? "").trim();
+        return texto && !/^https?:\/\//i.test(texto);
+      }) ?? "";
 
       return {
         id: `item-${index + 2}`,
@@ -356,6 +360,8 @@ function normalizarDadosPlanilha(payload) {
         cor,
         quantidadeOriginal: qtdNum,
         quantidadeAtual: qtdNum,
+        precoOriginal: String(preco).trim(),
+        precoAtual: String(preco).trim(),
         imagem: urlImagem,
       };
     }
@@ -375,6 +381,8 @@ function normalizarDadosPlanilha(payload) {
       cor: String(registro.cor ?? "").trim(),
       quantidadeOriginal: qtdNum,
       quantidadeAtual: qtdNum,
+      precoOriginal: String(registro.preco ?? registro.valor ?? "").trim(),
+      precoAtual: String(registro.preco ?? registro.valor ?? "").trim(),
       imagem: String(registro.imagem ?? registro.foto ?? registro.url ?? "").trim(),
     };
   });
@@ -566,7 +574,7 @@ async function recarregarEstoqueManualmente() {
   if (estado.carregando || estado.salvando) return;
   if (
     obterItensAlterados().length > 0 &&
-    !window.confirm("Há alterações de estoque ainda não salvas. Recarregar descartará essas alterações. Deseja continuar?")
+    !window.confirm("Há alterações de quantidade ou preço ainda não salvas. Recarregar descartará essas alterações. Deseja continuar?")
   ) {
     return;
   }
@@ -585,7 +593,7 @@ async function recarregarEstoqueManualmente() {
   }
 }
 
-// Constrói as linhas da tabela de estoque e liga os controles de quantidade e imagem.
+// Constrói as linhas da tabela de estoque e liga os controles de quantidade, preço e imagem.
 function renderizarTabela() {
   esconderImagem();
   el.corpoEstoque.innerHTML = "";
@@ -604,7 +612,7 @@ function renderizarTabela() {
   const fragmento = document.createDocumentFragment();
 
   for (const { item } of filtrados) {
-    const alterada = item.quantidadeAtual !== item.quantidadeOriginal;
+    const alterada = itemTemAlteracoes(item);
     const tr = document.createElement("tr");
     tr.dataset.id = item.id;
     tr.dataset.linha = String(item.linha);
@@ -679,7 +687,7 @@ function renderizarTabela() {
     }
     tdCor.appendChild(spanCor);
 
-    // Coluna 3: Quantidade com + e - (nunca menor que 0)
+    // Quantidade com + e - (nunca menor que 0)
     const tdQtd = document.createElement("td");
     tdQtd.className = "col-qtd";
     tdQtd.dataset.label = "Quantidade";
@@ -711,7 +719,38 @@ function renderizarTabela() {
     controle.append(btnMenos, spanQtd, btnMais);
     tdQtd.appendChild(controle);
 
-    tr.append(tdProduto, tdCor, tdQtd);
+    // Coluna de preço: o conteúdo segue o padrão da planilha (PIX / Cartão).
+    const tdPreco = document.createElement("td");
+    tdPreco.className = "col-preco";
+    tdPreco.dataset.label = "Preço";
+
+    const grupoPreco = document.createElement("div");
+    grupoPreco.className = "grupo-preco";
+    const rotuloPreco = document.createElement("label");
+    rotuloPreco.className = "rotulo-preco";
+    rotuloPreco.htmlFor = `preco-${item.linha}`;
+    rotuloPreco.textContent = "PIX / Cartão";
+
+    const campoPreco = document.createElement("input");
+    campoPreco.type = "text";
+    campoPreco.id = `preco-${item.linha}`;
+    campoPreco.className = "campo-preco";
+    campoPreco.inputMode = "decimal";
+    campoPreco.maxLength = 100;
+    campoPreco.autocomplete = "off";
+    campoPreco.placeholder = "Ex.: 100,00 / 110,00";
+    campoPreco.setAttribute("aria-label", `Preço PIX / Cartão de ${item.nome || "produto"}`);
+    campoPreco.value = item.precoAtual;
+    campoPreco.addEventListener("input", () => {
+      item.precoAtual = campoPreco.value;
+      tr.classList.toggle("alterada", itemTemAlteracoes(item));
+      atualizarBarraSalvar();
+    });
+
+    grupoPreco.append(rotuloPreco, campoPreco);
+    tdPreco.appendChild(grupoPreco);
+
+    tr.append(tdProduto, tdCor, tdQtd, tdPreco);
     fragmento.appendChild(tr);
   }
 
@@ -732,11 +771,15 @@ function alterarQuantidade(id, delta) {
   atualizarBarraSalvar();
 }
 
-// Retorna apenas os produtos cuja quantidade difere da última quantidade confirmada.
+// Indica se a quantidade ou o preço local difere do último valor confirmado.
+function itemTemAlteracoes(item) {
+  return item.quantidadeAtual !== item.quantidadeOriginal ||
+    String(item.precoAtual ?? "").trim() !== String(item.precoOriginal ?? "").trim();
+}
+
+// Retorna os produtos cuja quantidade ou preço difere da última confirmação.
 function obterItensAlterados() {
-  return estado.itens.filter(
-    (item) => item.quantidadeAtual !== item.quantidadeOriginal
-  );
+  return estado.itens.filter(itemTemAlteracoes);
 }
 
 // Exibe ou oculta a barra inferior de salvar conforme existam alterações no estoque.
@@ -749,23 +792,24 @@ function atualizarBarraSalvar() {
     return;
   }
 
-  el.resumoAlteracoes.innerHTML = `<strong>${total}</strong> item(ns) alterado(s)`;
+  el.resumoAlteracoes.innerHTML = `<strong>${total}</strong> item(ns) com alteração`;
   el.barraSalvar.classList.add("visivel");
 }
 
-// Desfaz todas as alterações de estoque ainda não enviadas ao servidor.
+// Desfaz todas as alterações de quantidade e preço ainda não enviadas ao servidor.
 function descartarAlteracoes() {
   for (const item of estado.itens) {
     item.quantidadeAtual = item.quantidadeOriginal;
+    item.precoAtual = item.precoOriginal;
   }
   renderizarTabela();
   atualizarBarraSalvar();
 }
 
-// Bloqueia operações estruturais enquanto existirem quantidades locais ainda não salvas.
+// Bloqueia operações estruturais enquanto houver alterações de quantidade ou preço.
 function verificarSemAlteracoesPendentes() {
   if (obterItensAlterados().length === 0) return true;
-  window.alert("Salve ou descarte as alterações de quantidade antes de adicionar ou remover produtos.");
+  window.alert("Salve ou descarte as alterações de quantidade e preço antes de adicionar ou remover produtos.");
   return false;
 }
 
@@ -1631,7 +1675,7 @@ function abrirModalSenha(operacao = "estoque") {
           ? "Digite sua senha de funcionário para adicionar o produto à planilha."
           : operacao === "removerProduto"
             ? `Digite sua senha de funcionário para remover ${estado.produtoPendente?.nome || "o produto"} e todas as cores dele da planilha.`
-            : "Digite sua senha de funcionário para salvar as novas quantidades na planilha.";
+            : "Digite sua senha de funcionário para salvar as quantidades e os preços na planilha.";
   }
   if (el.labelSenhaFuncionario) {
     el.labelSenhaFuncionario.textContent = operacao === "venda"
@@ -1704,9 +1748,21 @@ async function salvarAlteracoesComSenha(evento) {
     cor: item.cor,
     quantidadeAnterior: item.quantidadeOriginal,
     quantidadeNova: Math.max(0, item.quantidadeAtual),
+    precoAnterior: String(item.precoOriginal ?? "").trim(),
+    precoNovo: String(item.precoAtual ?? "").trim(),
   }));
 
   if (alterados.length === 0) return;
+
+  const precoInvalido = estado.itens.find((item) =>
+    itemTemAlteracoes(item) && String(item.precoAtual ?? "").split("/").length > 2
+  );
+  if (precoInvalido) {
+    el.erroSenha.textContent = "Informe um preço PIX e, se necessário, um preço para cartão, separados por uma única barra (/).";
+    el.erroSenha.hidden = false;
+    document.getElementById(`preco-${precoInvalido.linha}`)?.focus();
+    return;
+  }
 
   estado.salvando = true;
   el.erroSenha.hidden = true;
@@ -1743,6 +1799,8 @@ async function salvarAlteracoesComSenha(evento) {
     // Confirma as novas quantidades como base atual
     for (const item of estado.itens) {
       item.quantidadeOriginal = item.quantidadeAtual;
+      item.precoOriginal = String(item.precoAtual ?? "").trim();
+      item.precoAtual = item.precoOriginal;
     }
 
     estado.salvando = false;
